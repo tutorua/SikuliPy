@@ -1,0 +1,27 @@
+I am planning to redesign application which allows to interact with the images and text displayed on the screen. 
+The new code shall be executed on Windows and Linux and maybe macOS. The existed application is written in Java and uses Jython. 
+The new application can be created using Python or Typescript. The core functionality uses OpenCV for image processing and OCR 
+Tesseract for text processing. All used software shall be opensource. The interface of application might look close to VS Code.
+It will contain several resizable panels for main meu at the top, for code explorer at the left, 
+for console outputs at the bottom and for images preview at the right. It might be great to have a syntax highlight 
+and the linter. Also desirable feature is switching light and dark themes.   
+
+The answers:
+1. The application captures the screen automatically (like a snipping tool/screen recorder), or does the user manually upload/load image files?
+We might foresee the need for both: manually load image files and automatically capture screen.
+2. Technology Preference: Do you have a stronger preference for Python or TypeScript?
+The preference is for Python. 
+3. Code Explorer & Editor: What kind of scripts/code will the user edit in the left panel? What programming language needs the syntax highlighting and linting?
+The user will edit code in Python.
+The syntax highlighting and linting shall be implemented for Python.
+4. OCR Purpose: What exactly will the extracted text from Tesseract be used for? (e.g., automation, saving data, search?)
+The extracted text will be used for automation and for saving data.
+5. OpenCV Features: Are there specific image processing tasks needed from OpenCV (e.g., template matching, object detection, filtering?)
+We might foresee the need for template matching, object detection, filtering and other image processing tasks.
+The main purpose of the applicationis visual testing which supose matching baseline images with the test images. 
+So it shall be possible to create scripts which will capture screenshots with the defined areas, compare them with baseline images and save the results. 
+The automatic mode might works for finding the actionable elements in the dynamic web page. Making screenshots of actionable elements and find the diffrence between the screenshots. 
+Not only screenshots, but also we might capture the specific areas of the screen and compare them with the baseline images.  Also the text can be recognized and compared to the expected using Levinstein distance.  It shall be possible to define the area of the screen and save it as a baseline image.
+
+The application is intended to be used as a tool for visual testing of web applications.  The user will create a test script which will be executed by the application. The test script will be a Python script which will be executed by the application. The test script will be a Python script which will be executed by the application. The test script will be a Python script which will be executed by the application.    
+In the future we might think on integration with Playwright for test execution. But it is not required for the first version.
