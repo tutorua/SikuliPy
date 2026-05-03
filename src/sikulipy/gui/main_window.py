@@ -1,8 +1,9 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QDockWidget, QTextEdit, QTreeView, 
-    QLabel, QToolBar, QStatusBar, QFileDialog, QMessageBox
+    QLabel, QToolBar, QStatusBar, QFileDialog, QMessageBox,
+    QWidget, QVBoxLayout, QListWidget
 )
-from PyQt6.QtGui import QFileSystemModel
+from PyQt6.QtGui import QFileSystemModel, QPixmap
 from PyQt6.QtCore import Qt
 from sikulipy.gui.editor import PythonEditor
 import os
@@ -45,17 +46,37 @@ class SikuliPyMainWindow(QMainWindow):
         self.file_tree = QTreeView()
         self.file_tree.setStyleSheet("background-color: #252526; color: #CCCCCC; border: none;")
         self.file_tree.doubleClicked.connect(self.on_tree_double_click)
+        self.file_tree.clicked.connect(self.on_tree_clicked)
         self.explorer_dock.setWidget(self.file_tree)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.explorer_dock)
 
         # Right Dock: Image Preview
         self.preview_dock = QDockWidget("Image Preview", self)
         self.preview_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
+        
+        self.preview_widget = QWidget()
+        self.preview_layout = QVBoxLayout(self.preview_widget)
+        self.preview_layout.setContentsMargins(0, 0, 0, 0)
+        self.preview_layout.setSpacing(0)
+        
+        self.image_list = QListWidget()
+        self.image_list.setStyleSheet("background-color: #252526; color: #CCCCCC; border: none; padding: 5px;")
+        self.image_list.itemClicked.connect(self.on_image_list_clicked)
+        
         self.preview_label = QLabel("No image selected.")
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setStyleSheet("background-color: #1E1E1E; color: #888888; border: none;")
-        self.preview_dock.setWidget(self.preview_label)
+        self.preview_label.setMinimumHeight(200)
+        
+        self.preview_layout.addWidget(self.image_list)
+        self.preview_layout.addWidget(self.preview_label)
+        
+        self.preview_dock.setWidget(self.preview_widget)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.preview_dock)
+
+        # Connect editor signals
+        self.editor.textChanged.connect(self.update_image_list)
+        self.editor.cursorPositionChanged.connect(self.on_cursor_position_changed)
 
         # Bottom Dock: Console
         self.console_dock = QDockWidget("Console Output", self)
@@ -157,7 +178,17 @@ class SikuliPyMainWindow(QMainWindow):
             return
         file_path = self.file_model.filePath(index)
         if not self.file_model.isDir(index):
-            self.load_file(file_path)
+            # Only open text/python files in editor, not images
+            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                self.load_file(file_path)
+
+    def on_tree_clicked(self, index):
+        if not self.file_model:
+            return
+        file_path = self.file_model.filePath(index)
+        if not self.file_model.isDir(index):
+            if file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                self.display_image_path(file_path)
 
     def load_file(self, file_path):
         try:
@@ -174,3 +205,56 @@ class SikuliPyMainWindow(QMainWindow):
         from PyQt6.QtGui import QDesktopServices
         from PyQt6.QtCore import QUrl
         QDesktopServices.openUrl(QUrl("https://sikulix-2014.readthedocs.io/en/latest/"))
+
+    def update_image_list(self):
+        import re
+        text = self.editor.toPlainText()
+        # Find strings ending with common image extensions
+        matches = re.findall(r'["\']([^"\']+\.(?:png|jpg|jpeg))["\']', text, re.IGNORECASE)
+        # Unique list preserving order
+        images = list(dict.fromkeys(matches))
+        
+        # Only update if changed to avoid unnecessary clears/flashes
+        current_items = [self.image_list.item(i).text() for i in range(self.image_list.count())]
+        if current_items != images:
+            self.image_list.clear()
+            for img in images:
+                self.image_list.addItem(img)
+
+    def on_image_list_clicked(self, item):
+        self.display_image(item.text())
+
+    def display_image(self, image_name):
+        if not self.current_file:
+            return
+        import os
+        base_dir = os.path.dirname(self.current_file)
+        img_path = os.path.join(base_dir, image_name)
+        self.display_image_path(img_path, image_name)
+
+    def display_image_path(self, img_path, display_name=None):
+        import os
+        display_name = display_name or os.path.basename(img_path)
+        if os.path.exists(img_path):
+            pixmap = QPixmap(img_path)
+            # Scale down if it's too large, but keep aspect ratio
+            scaled_pixmap = pixmap.scaled(self.preview_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.preview_label.setPixmap(scaled_pixmap)
+        else:
+            self.preview_label.clear()
+            self.preview_label.setText(f"Image not found:\n{display_name}")
+
+    def on_cursor_position_changed(self):
+        import re
+        cursor = self.editor.textCursor()
+        line_text = cursor.block().text()
+        pos_in_line = cursor.positionInBlock()
+        
+        for match in re.finditer(r'["\']([^"\']+\.(?:png|jpg|jpeg))["\']', line_text, re.IGNORECASE):
+            if match.start() <= pos_in_line <= match.end():
+                image_name = match.group(1)
+                items = self.image_list.findItems(image_name, Qt.MatchFlag.MatchExactly)
+                if items:
+                    self.image_list.setCurrentItem(items[0])
+                    self.display_image(image_name)
+                break

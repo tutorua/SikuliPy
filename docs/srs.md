@@ -58,7 +58,7 @@ The application interface will follow a "VS Code-like" dark/light theme paradigm
 - **Header:** Action buttons (Run, Stop, Capture Screen, Capture Region).
 - **Left Sidebar:** Project file tree and image asset browser.
 - **Center Area:** Code editor.
-- **Right Sidebar:** Image preview pane showing the currently selected baseline image or the latest test output diff.
+- **Right Sidebar:** Image preview pane featuring a dynamic list of image files referenced in the active script, a preview display area, and cursor synchronization (clicking an image name in the editor highlights and previews it).
 - **Bottom Panel:** Terminal/Console output for standard out/error from the executing script.
 
 ### 4.2 Software Interfaces

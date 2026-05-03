@@ -35,7 +35,10 @@ The UI will closely resemble modern IDEs like VS Code, featuring a modular, resi
   - **Top:** Main Menu & Toolbars (for execution controls, capture tools, etc.).
   - **Left:** Code/File Explorer (for managing Python test scripts, project files, and baseline images).
   - **Center:** Code Editor dedicated to Python, featuring Python syntax highlighting and linting.
-  - **Right:** Image Preview panel (for viewing baseline images, current screenshots, and visual diffs).
+  - **Right:** Image Preview panel. Features include:
+    - **Dynamic Image List:** Automatically scans the active code editor for image references and displays them in a list.
+    - **Image Display:** Renders the selected baseline image, current screenshot, or visual diff.
+    - **Cursor Synchronization:** Clicking or moving the cursor over an image name in the editor automatically highlights it in the list and displays the image.
   - **Bottom:** Console Outputs (for displaying script execution logs, test results, and system messages).
 
 ## 7. Future Considerations (Post v1)
