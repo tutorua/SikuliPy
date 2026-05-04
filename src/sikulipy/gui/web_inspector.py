@@ -177,7 +177,26 @@ class WebInspectorPane(QWidget):
         super().__init__()
         layout = QVBoxLayout(self)
         
-        self.setStyleSheet("background-color: #252526; color: #CCCCCC;")
+        self.setStyleSheet("""
+            QWidget { 
+                background-color: #252526; 
+                color: #CCCCCC; 
+            }
+            QCheckBox::indicator {
+                border: 1px solid #CCCCCC;
+                width: 14px;
+                height: 14px;
+                background-color: #1E1E1E;
+                border-radius: 2px;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #007ACC;
+                border: 1px solid #007ACC;
+            }
+            QCheckBox::indicator:hover {
+                border: 1px solid #007ACC;
+            }
+        """)
         
         self.cb_links = QCheckBox("Links")
         self.cb_buttons = QCheckBox("Buttons")
@@ -237,7 +256,11 @@ class WebInspectorPane(QWidget):
             display_text = el['text'] if el['text'] else el.get('ariaLabel', '')
             text = f"[{el['category']}] {display_text}" if display_text else f"[{el['category']}] {el['id']}"
             item = QListWidgetItem(text)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
             item.setData(Qt.ItemDataRole.UserRole, el['id'])
+            # Store the category in UserRole+1 for easy retrieval during capture
+            item.setData(Qt.ItemDataRole.UserRole + 1, el['category'])
             self.list_widget.addItem(item)
             
     def select_list_item(self, el_id):

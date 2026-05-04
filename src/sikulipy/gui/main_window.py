@@ -489,53 +489,54 @@ class SikuliPyMainWindow(QMainWindow):
         self.recorder_dialog.show()
         
     def on_web_take_screenshot(self):
-        if not self.web_canvas or not self.web_canvas.rect_items:
-            self.console_text.append("[Error] No filtered elements to capture.")
+        if not self.web_canvas or not self.web_pane:
+            self.console_text.append("[Error] Web Inspector components not found.")
             return
             
         import os, time
-        assets_dir = os.path.join(self.project_dir, "assets")
-        if not os.path.exists(assets_dir):
-            os.makedirs(assets_dir)
-            
         count = 0
         timestamp = int(time.time())
         
-        for i, rect_item in enumerate(self.web_canvas.rect_items):
-            rect = rect_item.rect()
-            el_pixmap = self.web_canvas.full_pixmap.copy(int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height()))
+        # Iterate through the list items to see which ones are checked
+        for i in range(self.web_pane.list_widget.count()):
+            item = self.web_pane.list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                el_id = item.data(Qt.ItemDataRole.UserRole)
+                category = item.data(Qt.ItemDataRole.UserRole + 1)
+                
+                # Find the corresponding rect_item on the canvas
+                rect_item = next((r for r in self.web_canvas.rect_items if r.element_data['id'] == el_id), None)
+                if rect_item:
+                    rect = rect_item.rect()
+                    el_pixmap = self.web_canvas.full_pixmap.copy(int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height()))
+                    
+                    el_data = rect_item.element_data
+                    source_text = el_data['text'] if el_data['text'] else el_data.get('ariaLabel', '')
+                    safe_text = "".join([c for c in source_text if c.isalnum() or c in (' ', '_', '-')]).strip()[:20].replace(' ', '_')
+                    if not safe_text:
+                        safe_text = f"el_{i}"
+                    
+                    # Create subfolder by category inside assets
+                    cat_dir = os.path.join(self.project_dir, "assets", category)
+                    if not os.path.exists(cat_dir):
+                        os.makedirs(cat_dir)
+                    
+                    # Shorten filename (removed web_ and category prefix)
+                    filename = f"{safe_text}_{timestamp}_{i}.png"
+                    filepath = os.path.join(cat_dir, filename)
+                    
+                    # Save (overwrites by default)
+                    el_pixmap.save(filepath, "PNG")
+                    count += 1
+                    
+                    # If this specific element is the one currently selected in the inspector,
+                    # generate the click action for it
+                    if self.web_canvas.selected_rect and self.web_canvas.selected_rect.element_data['id'] == el_id:
+                        rel_path = f"assets/{category}/{filename}"
+                        code_str = f'click("{rel_path}")'
+                        cursor = self.editor.textCursor()
+                        cursor.insertText(code_str + "\n")
+                        self.editor.setTextCursor(cursor)
+                        self.console_text.append(f"[System] Inserted action for selected element: {rel_path}")
             
-            el_data = rect_item.element_data
-            # Use text or aria-label for filename
-            source_text = el_data['text'] if el_data['text'] else el_data.get('ariaLabel', '')
-            safe_text = "".join([c for c in source_text if c.isalnum() or c in (' ', '_', '-')]).strip()[:20].replace(' ', '_')
-            if not safe_text:
-                safe_text = f"el_{i}"
-            
-            filename = f"web_{el_data['category'].lower()}_{safe_text}_{timestamp}_{i}.png"
-            filepath = os.path.join(assets_dir, filename)
-            el_pixmap.save(filepath, "PNG")
-            count += 1
-            
-        self.console_text.append(f"[System] Saved {count} web elements to {assets_dir}")
-        
-        # If one is selected, also insert the click action as before
-        selected_pixmap = self.web_canvas.get_selected_pixmap()
-        if selected_pixmap and self.web_canvas.selected_rect:
-            el_data = self.web_canvas.selected_rect.element_data
-            source_text = el_data['text'] if el_data['text'] else el_data.get('ariaLabel', '')
-            safe_text = "".join([c for c in source_text if c.isalnum() or c in (' ', '_', '-')]).strip()[:20].replace(' ', '_')
-            if not safe_text: safe_text = "selected"
-            
-            # Use a separate filename for the explicitly selected one to be sure it's linked
-            filename = f"web_selected_{safe_text}_{timestamp}.png"
-            filepath = os.path.join(assets_dir, filename)
-            selected_pixmap.save(filepath, "PNG")
-            
-            rel_path = f"assets/{filename}"
-            code_str = f'click("{rel_path}")'
-            
-            cursor = self.editor.textCursor()
-            cursor.insertText(code_str + "\n")
-            self.editor.setTextCursor(cursor)
-            self.console_text.append(f"[System] Inserted click action for selected element: {rel_path}")
+        self.console_text.append(f"[System] Saved {count} selected elements into category subfolders in assets/")

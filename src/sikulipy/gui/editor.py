@@ -54,6 +54,3 @@ class PythonEditor(QPlainTextEdit):
         """)
         
         self.highlighter = PythonHighlighter(self.document())
-        
-        # Add some initial text
-        self.setPlainText("# Write your SikuliPy test script here\nimport sikulipy\n\ndef run_test():\n    print('Hello World!')\n\nif __name__ == '__main__':\n    run_test()")
