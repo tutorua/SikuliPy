@@ -119,6 +119,7 @@ class RecorderDialog(QDialog):
         layout = QVBoxLayout(tab)
         
         self.url_edit = QLineEdit()
+        self.url_edit.setText("https://")
         self.url_edit.setPlaceholderText("Enter URL here (e.g. https://google.com)")
         layout.addWidget(self.url_edit)
         

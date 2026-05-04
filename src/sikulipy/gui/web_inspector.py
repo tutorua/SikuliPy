@@ -38,10 +38,12 @@ class WebInspectorWorker(QThread):
                         els.forEach((el, index) => {
                             const rect = el.getBoundingClientRect();
                             if (rect.width > 0 && rect.height > 0) {
+                                const ariaLabel = el.getAttribute('aria-label') || '';
                                 results.push({
                                     id: category + '_' + index,
                                     category: category,
                                     text: (el.innerText || el.value || el.placeholder || '').substring(0, 30).trim(),
+                                    ariaLabel: ariaLabel.substring(0, 30).trim(),
                                     x: rect.x + window.scrollX,
                                     y: rect.y + window.scrollY,
                                     w: rect.width,
@@ -232,7 +234,8 @@ class WebInspectorPane(QWidget):
     def update_list(self, elements):
         self.list_widget.clear()
         for el in elements:
-            text = f"[{el['category']}] {el['text']}" if el['text'] else f"[{el['category']}] (no text)"
+            display_text = el['text'] if el['text'] else el.get('ariaLabel', '')
+            text = f"[{el['category']}] {display_text}" if display_text else f"[{el['category']}] {el['id']}"
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, el['id'])
             self.list_widget.addItem(item)

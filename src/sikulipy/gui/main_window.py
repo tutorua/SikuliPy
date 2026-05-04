@@ -35,6 +35,7 @@ class SikuliPyMainWindow(QMainWindow):
 
         self.current_file = None
         self.file_model = None
+        self.project_dir = os.getcwd()
 
         self.setup_ui()
         self.setup_menu()
@@ -193,6 +194,7 @@ class SikuliPyMainWindow(QMainWindow):
             self.file_model.setRootPath(folder)
             self.file_tree.setModel(self.file_model)
             self.file_tree.setRootIndex(self.file_model.index(folder))
+            self.project_dir = folder
             # Hide some columns for better view (size, type, date modified)
             for i in range(1, 4):
                 self.file_tree.hideColumn(i)
@@ -398,7 +400,7 @@ class SikuliPyMainWindow(QMainWindow):
             screen = QApplication.primaryScreen()
             pixmap = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
             
-            assets_dir = os.path.join(os.getcwd(), "assets")
+            assets_dir = os.path.join(self.project_dir, "assets")
             if not os.path.exists(assets_dir):
                 os.makedirs(assets_dir)
                 
@@ -437,19 +439,24 @@ class SikuliPyMainWindow(QMainWindow):
     def on_web_capture_finished(self, pixmap, elements):
         self.console_text.append("[System] Web Inspector capture complete.")
         
-        if not hasattr(self, 'original_central_widget'):
-            self.original_central_widget = self.centralWidget()
+        if not hasattr(self, 'original_central_widget') or self.original_central_widget is None:
+            self.original_central_widget = self.takeCentralWidget()
+        else:
+            old = self.takeCentralWidget()
+            if old and old != self.original_central_widget:
+                old.deleteLater()
         
         self.web_canvas = WebInspectorCanvas()
         self.web_canvas.set_image(pixmap)
-        self.web_canvas.all_elements = elements
-        self.web_canvas.draw_elements(elements)
+        self.all_web_elements = elements
+        # Don't draw elements until user clicks Apply with selected filters
         
         self.setCentralWidget(self.web_canvas)
         self.explorer_dock.hide()
         
         self.web_pane = WebInspectorPane()
-        self.web_pane.update_list(elements)
+        # Start with an empty list to match the unmarked checkboxes
+        self.web_pane.update_list([])
         
         self.web_pane.applyFilters.connect(self.on_web_pane_apply_filters)
         self.web_pane.closeInspector.connect(self.on_web_pane_close)
@@ -463,36 +470,72 @@ class SikuliPyMainWindow(QMainWindow):
         self.preview_dock.setWindowTitle("Web Inspector")
 
     def on_web_pane_apply_filters(self, active_categories):
-        filtered_els = [el for el in self.web_canvas.all_elements if el['category'] in active_categories]
+        filtered_els = [el for el in self.all_web_elements if el['category'] in active_categories]
+        self.console_text.append(f"[System] Applied filters: {active_categories}. Found {len(filtered_els)} elements.")
         self.web_canvas.draw_elements(filtered_els)
         self.web_pane.update_list(filtered_els)
 
     def on_web_pane_close(self):
-        self.setCentralWidget(self.original_central_widget)
+        old = self.takeCentralWidget()
+        if old:
+            old.deleteLater()
+        if hasattr(self, 'original_central_widget') and self.original_central_widget is not None:
+            self.setCentralWidget(self.original_central_widget)
+            self.original_central_widget = None
+            
         self.explorer_dock.show()
         self.preview_dock.setWidget(self.preview_widget)
         self.preview_dock.setWindowTitle("Image Preview")
         self.recorder_dialog.show()
         
     def on_web_take_screenshot(self):
-        pixmap = self.web_canvas.get_selected_pixmap()
-        if not pixmap:
-            self.console_text.append("[Error] No element selected to take screenshot.")
+        if not self.web_canvas or not self.web_canvas.rect_items:
+            self.console_text.append("[Error] No filtered elements to capture.")
             return
             
         import os, time
-        assets_dir = os.path.join(os.getcwd(), "assets")
+        assets_dir = os.path.join(self.project_dir, "assets")
         if not os.path.exists(assets_dir):
             os.makedirs(assets_dir)
             
-        filename = f"web_img_{int(time.time())}.png"
-        filepath = os.path.join(assets_dir, filename)
-        pixmap.save(filepath, "PNG")
+        count = 0
+        timestamp = int(time.time())
         
-        rel_path = f"assets/{filename}"
-        code_str = f'click("{rel_path}")'
+        for i, rect_item in enumerate(self.web_canvas.rect_items):
+            rect = rect_item.rect()
+            el_pixmap = self.web_canvas.full_pixmap.copy(int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height()))
+            
+            el_data = rect_item.element_data
+            # Use text or aria-label for filename
+            source_text = el_data['text'] if el_data['text'] else el_data.get('ariaLabel', '')
+            safe_text = "".join([c for c in source_text if c.isalnum() or c in (' ', '_', '-')]).strip()[:20].replace(' ', '_')
+            if not safe_text:
+                safe_text = f"el_{i}"
+            
+            filename = f"web_{el_data['category'].lower()}_{safe_text}_{timestamp}_{i}.png"
+            filepath = os.path.join(assets_dir, filename)
+            el_pixmap.save(filepath, "PNG")
+            count += 1
+            
+        self.console_text.append(f"[System] Saved {count} web elements to {assets_dir}")
         
-        cursor = self.editor.textCursor()
-        cursor.insertText(code_str + "\n")
-        self.editor.setTextCursor(cursor)
-        self.console_text.append(f"[System] Saved web element to {rel_path} and inserted click action.")
+        # If one is selected, also insert the click action as before
+        selected_pixmap = self.web_canvas.get_selected_pixmap()
+        if selected_pixmap and self.web_canvas.selected_rect:
+            el_data = self.web_canvas.selected_rect.element_data
+            source_text = el_data['text'] if el_data['text'] else el_data.get('ariaLabel', '')
+            safe_text = "".join([c for c in source_text if c.isalnum() or c in (' ', '_', '-')]).strip()[:20].replace(' ', '_')
+            if not safe_text: safe_text = "selected"
+            
+            # Use a separate filename for the explicitly selected one to be sure it's linked
+            filename = f"web_selected_{safe_text}_{timestamp}.png"
+            filepath = os.path.join(assets_dir, filename)
+            selected_pixmap.save(filepath, "PNG")
+            
+            rel_path = f"assets/{filename}"
+            code_str = f'click("{rel_path}")'
+            
+            cursor = self.editor.textCursor()
+            cursor.insertText(code_str + "\n")
+            self.editor.setTextCursor(cursor)
+            self.console_text.append(f"[System] Inserted click action for selected element: {rel_path}")
