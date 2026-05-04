@@ -10,4 +10,11 @@ dependencies = [
     "pytesseract>=0.3",
     "pyautogui>=0.9",
     "playwright>=1.40",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-playwright>=0.4",
 ]

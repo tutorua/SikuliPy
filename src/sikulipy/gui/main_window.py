@@ -429,6 +429,7 @@ class SikuliPyMainWindow(QMainWindow):
 
     def on_web_auto_requested(self, url):
         self.console_text.append(f"[System] Starting Playwright Web Inspector for {url}...")
+        self.web_inspector_url = url   # store for POM generation
         self.recorder_dialog.hide()
         
         self.web_worker = WebInspectorWorker(url)
@@ -492,51 +493,113 @@ class SikuliPyMainWindow(QMainWindow):
         if not self.web_canvas or not self.web_pane:
             self.console_text.append("[Error] Web Inspector components not found.")
             return
-            
-        import os, time
-        count = 0
+
+        import os, time, re
+        from urllib.parse import urlparse
+
+        update_mode = self.web_pane.rb_update.isChecked()
         timestamp = int(time.time())
-        
-        # Iterate through the list items to see which ones are checked
+        count = 0
+        captured_elements = []   # will carry '_asset_path' for codegen
+
+        # ---- derive a page name from the URL ----
+        url = getattr(self, 'web_inspector_url', 'page')
+        parsed = urlparse(url)
+        raw = parsed.netloc.replace('www.', '') + parsed.path
+        page_name = re.sub(r'[^a-z0-9]+', '_', raw.lower()).strip('_') or 'page'
+
         for i in range(self.web_pane.list_widget.count()):
             item = self.web_pane.list_widget.item(i)
-            if item.checkState() == Qt.CheckState.Checked:
-                el_id = item.data(Qt.ItemDataRole.UserRole)
-                category = item.data(Qt.ItemDataRole.UserRole + 1)
-                
-                # Find the corresponding rect_item on the canvas
-                rect_item = next((r for r in self.web_canvas.rect_items if r.element_data['id'] == el_id), None)
-                if rect_item:
-                    rect = rect_item.rect()
-                    el_pixmap = self.web_canvas.full_pixmap.copy(int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height()))
-                    
-                    el_data = rect_item.element_data
-                    source_text = el_data['text'] if el_data['text'] else el_data.get('ariaLabel', '')
-                    safe_text = "".join([c for c in source_text if c.isalnum() or c in (' ', '_', '-')]).strip()[:20].replace(' ', '_')
-                    if not safe_text:
-                        safe_text = f"el_{i}"
-                    
-                    # Create subfolder by category inside assets
-                    cat_dir = os.path.join(self.project_dir, "assets", category)
-                    if not os.path.exists(cat_dir):
-                        os.makedirs(cat_dir)
-                    
-                    # Shorten filename (removed web_ and category prefix)
-                    filename = f"{safe_text}_{timestamp}_{i}.png"
-                    filepath = os.path.join(cat_dir, filename)
-                    
-                    # Save (overwrites by default)
-                    el_pixmap.save(filepath, "PNG")
-                    count += 1
-                    
-                    # If this specific element is the one currently selected in the inspector,
-                    # generate the click action for it
-                    if self.web_canvas.selected_rect and self.web_canvas.selected_rect.element_data['id'] == el_id:
-                        rel_path = f"assets/{category}/{filename}"
-                        code_str = f'click("{rel_path}")'
-                        cursor = self.editor.textCursor()
-                        cursor.insertText(code_str + "\n")
-                        self.editor.setTextCursor(cursor)
-                        self.console_text.append(f"[System] Inserted action for selected element: {rel_path}")
-            
-        self.console_text.append(f"[System] Saved {count} selected elements into category subfolders in assets/")
+            if item.checkState() != Qt.CheckState.Checked:
+                continue
+
+            el_id = item.data(Qt.ItemDataRole.UserRole)
+            category = item.data(Qt.ItemDataRole.UserRole + 1)
+
+            rect_item = next(
+                (r for r in self.web_canvas.rect_items if r.element_data['id'] == el_id),
+                None
+            )
+            if not rect_item:
+                continue
+
+            rect = rect_item.rect()
+            el_pixmap = self.web_canvas.full_pixmap.copy(
+                int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
+            )
+
+            el_data = rect_item.element_data
+            source_text = el_data['text'] if el_data['text'] else el_data.get('ariaLabel', '')
+            safe_text = ''.join(
+                c for c in source_text if c.isalnum() or c in (' ', '_', '-')
+            ).strip()[:20].replace(' ', '_')
+            if not safe_text:
+                safe_text = f'el_{i}'
+
+            cat_dir = os.path.join(self.project_dir, 'assets', category)
+            os.makedirs(cat_dir, exist_ok=True)
+
+            if update_mode:
+                # In Update Baseline mode: no timestamp → overwrites existing baseline
+                filename = f'{safe_text}_{i}.png'
+            else:
+                filename = f'{safe_text}_{timestamp}_{i}.png'
+
+            filepath = os.path.join(cat_dir, filename)
+            el_pixmap.save(filepath, 'PNG')
+            count += 1
+
+            rel_path = f'assets/{category}/{filename}'
+            el_data['_asset_path'] = rel_path
+            captured_elements.append(el_data)
+
+            # Insert click snippet if this is the currently selected element
+            if (not update_mode and self.web_canvas.selected_rect
+                    and self.web_canvas.selected_rect.element_data['id'] == el_id):
+                code_str = f'click("{rel_path}")'
+                cursor = self.editor.textCursor()
+                cursor.insertText(code_str + '\n')
+                self.editor.setTextCursor(cursor)
+                self.console_text.append(f'[System] Inserted click action: {rel_path}')
+
+        self.console_text.append(
+            f'[System] Saved {count} element(s) into assets/ category subfolders.'
+        )
+
+        # ---- Generate Tests mode: run POM + test file generators ----
+        if not update_mode and captured_elements:
+            try:
+                from sikulipy.codegen.pom_generator import generate_page_object
+                from sikulipy.codegen.test_generator import generate_test_file
+
+                pom_path = generate_page_object(
+                    project_dir=self.project_dir,
+                    page_name=page_name,
+                    url=url,
+                    elements=captured_elements,
+                )
+                test_path = generate_test_file(
+                    project_dir=self.project_dir,
+                    page_name=page_name,
+                    url=url,
+                    elements=captured_elements,
+                )
+
+                # Write sikulipy_config.py at project root if it doesn't exist
+                config_dest = os.path.join(self.project_dir, 'sikulipy_config.py')
+                if not os.path.exists(config_dest):
+                    import shutil, inspect
+                    from sikulipy.codegen import config_template
+                    shutil.copy(inspect.getfile(config_template), config_dest)
+                    self.console_text.append(f'[System] Created config: {config_dest}')
+
+                self.console_text.append(f'[System] Page Object  → {pom_path}')
+                self.console_text.append(f'[System] Test file    → {test_path}')
+                self.console_text.append(
+                    f'[System] Run tests with: pytest {os.path.relpath(test_path, self.project_dir)} -v'
+                )
+
+            except Exception as e:
+                self.console_text.append(f'[Error] Code generation failed: {e}')
+        elif update_mode:
+            self.console_text.append('[System] Update Baseline mode — test files were NOT regenerated.')
