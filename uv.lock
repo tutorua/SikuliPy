@@ -849,6 +849,7 @@ dependencies = [
     { name = "pyautogui" },
     { name = "pyqt6" },
     { name = "pytesseract" },
+    { name = "pytest" },
 ]
 
 [package.optional-dependencies]
@@ -865,6 +866,7 @@ requires-dist = [
     { name = "pyautogui", specifier = ">=0.9" },
     { name = "pyqt6", specifier = ">=6.0" },
     { name = "pytesseract", specifier = ">=0.3" },
+    { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-playwright", marker = "extra == 'dev'", specifier = ">=0.4" },
 ]

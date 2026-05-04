@@ -56,7 +56,7 @@ def generate_page_object(project_dir: str, page_name: str, url: str, elements: l
         f'"""',
         f'',
         f'from playwright.sync_api import Page',
-        f'from sikulipy.testing import ImageAssertion, TextAssertion',
+        f'from sikulipy_testing import ImageAssertion, TextAssertion',
         f'',
         f'',
         f'class {cls}:',

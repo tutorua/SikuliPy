@@ -593,6 +593,14 @@ class SikuliPyMainWindow(QMainWindow):
                     shutil.copy(inspect.getfile(config_template), config_dest)
                     self.console_text.append(f'[System] Created config: {config_dest}')
 
+                # Copy the testing helpers library into the project so tests are self-contained
+                import shutil, inspect
+                import sikulipy.testing as _testing_module
+                testing_src = inspect.getfile(_testing_module)
+                testing_dest = os.path.join(self.project_dir, 'sikulipy_testing.py')
+                shutil.copy(testing_src, testing_dest)
+                self.console_text.append(f'[System] Copied testing helpers → {testing_dest}')
+
                 self.console_text.append(f'[System] Page Object  → {pom_path}')
                 self.console_text.append(f'[System] Test file    → {test_path}')
                 self.console_text.append(
