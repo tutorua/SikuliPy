@@ -8,3 +8,20 @@ wheels/
 
 # Virtual environments
 .venv
+.mypy_cache/
+.pytest_cache/
+.DS_Store
+
+# OS files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tif
+*.tiff
+*.webp
+*.heic
+*.heif
+*.ico
+
