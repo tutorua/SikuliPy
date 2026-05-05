@@ -509,6 +509,7 @@ class SikuliPyMainWindow(QMainWindow):
         self.web_pane.applyFilters.connect(self.on_web_pane_apply_filters)
         self.web_pane.closeInspector.connect(self.on_web_pane_close)
         self.web_pane.listItemSelected.connect(self.web_canvas.select_element_by_id)
+        self.web_pane.itemCheckChanged.connect(self.web_canvas.set_rect_visible)
         self.web_pane.takeScreenshot.connect(self.on_web_take_screenshot)
         
         self.web_canvas.elementClicked.connect(lambda el: self.web_pane.select_list_item(el['id']))
@@ -520,7 +521,11 @@ class SikuliPyMainWindow(QMainWindow):
     def on_web_pane_apply_filters(self, active_categories):
         filtered_els = [el for el in self.all_web_elements if el['category'] in active_categories]
         self.console_text.append(f"[System] Applied filters: {active_categories}. Found {len(filtered_els)} elements.")
-        self.web_canvas.draw_elements(filtered_els)
+        
+        # If > 10 elements, don't outline by default
+        checked_ids = [el['id'] for el in filtered_els] if len(filtered_els) <= 10 else []
+        
+        self.web_canvas.draw_elements(filtered_els, checked_ids)
         self.web_pane.update_list(filtered_els)
 
     def on_web_pane_close(self):

@@ -136,7 +136,7 @@ class WebInspectorCanvas(QGraphicsView):
         self.pixmap_item = self.scene.addPixmap(pixmap)
         self.setSceneRect(QRectF(pixmap.rect()))
 
-    def draw_elements(self, elements):
+    def draw_elements(self, elements, checked_ids=None):
         for r in self.rect_items:
             self.scene.removeItem(r)
         self.rect_items.clear()
@@ -145,6 +145,16 @@ class WebInspectorCanvas(QGraphicsView):
             rect = SelectableRectItem(el, self.on_rect_clicked)
             self.scene.addItem(rect)
             self.rect_items.append(rect)
+            if checked_ids is not None:
+                rect.setVisible(el['id'] in checked_ids)
+
+    def set_rect_visible(self, el_id, visible):
+        for r in self.rect_items:
+            if r.element_data['id'] == el_id:
+                r.setVisible(visible)
+                if visible:
+                    self.ensureVisible(r, 50, 50)
+                break
 
     def on_rect_clicked(self, rect_item):
         if self.selected_rect:
@@ -172,6 +182,7 @@ class WebInspectorPane(QWidget):
     takeScreenshot = pyqtSignal()
     closeInspector = pyqtSignal()
     listItemSelected = pyqtSignal(str)
+    itemCheckChanged = pyqtSignal(str, bool)
 
     def __init__(self):
         super().__init__()
@@ -253,6 +264,7 @@ class WebInspectorPane(QWidget):
         
         self.list_widget = QListWidget()
         self.list_widget.itemClicked.connect(self._on_list_clicked)
+        self.list_widget.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self.list_widget)
         
         self.preview_label = QLabel("No element selected.")
@@ -269,18 +281,29 @@ class WebInspectorPane(QWidget):
         el_id = item.data(Qt.ItemDataRole.UserRole)
         self.listItemSelected.emit(el_id)
 
+    def _on_item_changed(self, item):
+        el_id = item.data(Qt.ItemDataRole.UserRole)
+        checked = (item.checkState() == Qt.CheckState.Checked)
+        self.itemCheckChanged.emit(el_id, checked)
+
     def update_list(self, elements):
+        self.list_widget.blockSignals(True)
         self.list_widget.clear()
+        
+        # If > 10 elements, don't check them by default
+        initial_state = Qt.CheckState.Checked if len(elements) <= 10 else Qt.CheckState.Unchecked
+        
         for el in elements:
             display_text = el['text'] if el['text'] else el.get('ariaLabel', '')
             text = f"[{el['category']}] {display_text}" if display_text else f"[{el['category']}] {el['id']}"
             item = QListWidgetItem(text)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            item.setCheckState(initial_state)
             item.setData(Qt.ItemDataRole.UserRole, el['id'])
             # Store the category in UserRole+1 for easy retrieval during capture
             item.setData(Qt.ItemDataRole.UserRole + 1, el['category'])
             self.list_widget.addItem(item)
+        self.list_widget.blockSignals(False)
             
     def select_list_item(self, el_id):
         for i in range(self.list_widget.count()):
