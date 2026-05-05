@@ -1,15 +1,17 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QDockWidget, QTextEdit, QTreeView, 
     QLabel, QToolBar, QStatusBar, QFileDialog, QMessageBox,
-    QWidget, QVBoxLayout, QListWidget
+    QWidget, QVBoxLayout, QListWidget, QHBoxLayout, QPushButton,
+    QFrame, QRadioButton, QButtonGroup, QToolButton, QMenu
 )
-from PyQt6.QtGui import QFileSystemModel, QPixmap
-from PyQt6.QtCore import Qt, QProcess
+from PyQt6.QtGui import QFileSystemModel, QPixmap, QAction
+from PyQt6.QtCore import Qt, QProcess, pyqtSignal
 from sikulipy.gui.editor import PythonEditor
 from sikulipy.gui.overlay import RegionCaptureOverlay
 from sikulipy.vision import VisionEngine
 from sikulipy.gui.recorder import RecorderDialog
 from sikulipy.gui.web_inspector import WebInspectorWorker, WebInspectorCanvas, WebInspectorPane
+from sikulipy.codegen.env_setup import EnvSetupWorker
 import os
 
 class SikuliPyMainWindow(QMainWindow):
@@ -38,7 +40,7 @@ class SikuliPyMainWindow(QMainWindow):
         self.project_dir = os.getcwd()
 
         self.setup_ui()
-        self.setup_menu()
+        # Menu is now integrated into the toolbar via create_file_menu called in setup_ui
 
     def setup_ui(self):
         # Center Widget: Editor
@@ -98,12 +100,17 @@ class SikuliPyMainWindow(QMainWindow):
         self.toolbar.setStyleSheet("background-color: #3C3C3C; color: white; border: none; padding: 2px;")
         self.addToolBar(self.toolbar)
         
-        new_btn = self.toolbar.addAction("📄 New")
-        new_btn.triggered.connect(self.new_file)
-        open_btn = self.toolbar.addAction("📂 Open")
-        open_btn.triggered.connect(self.open_folder)
-        save_btn = self.toolbar.addAction("💾 Save")
-        save_btn.triggered.connect(self.save_file)
+        # File Menu as a Button in the Toolbar
+        self.file_menu = self.create_file_menu()
+        file_btn = QToolButton()
+        file_btn.setText("File")
+        file_btn.setMenu(self.file_menu)
+        file_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        file_btn.setStyleSheet("""
+            QToolButton { padding: 4px; background-color: #3C3C3C; color: white; border: none; }
+            QToolButton::menu-indicator { image: none; width: 0px; }
+        """)
+        self.toolbar.addWidget(file_btn)
         self.toolbar.addSeparator()
         
         self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -157,20 +164,55 @@ class SikuliPyMainWindow(QMainWindow):
         painter.end()
         return QIcon(pixmap)
 
-    def setup_menu(self):
-        menubar = self.menuBar()
-        menubar.setStyleSheet("background-color: #3C3C3C; color: white;")
+    def create_file_menu(self):
+        # Hide the default menu bar to save space
+        self.menuBar().setVisible(False)
         
-        file_menu = menubar.addMenu("File")
+        file_menu = QMenu("File", self)
+        file_menu.setStyleSheet("background-color: #3C3C3C; color: white;")
         
-        new_action = file_menu.addAction("New")
-        new_action.triggered.connect(self.new_file)
+        new_file_action = file_menu.addAction("New File")
+        new_file_action.setShortcut("Ctrl+N")
+        new_file_action.triggered.connect(self.new_file)
         
-        open_action = file_menu.addAction("Open")
+        new_proj_action = file_menu.addAction("New Project")
+        new_proj_action.setShortcut("Ctrl+Shift+N")
+        new_proj_action.triggered.connect(self.on_new_project)
+        
+        file_menu.addSeparator()
+        
+        open_action = file_menu.addAction("Open Folder/Project")
+        open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.open_folder)
         
-        save_action = file_menu.addAction("Save")
+        save_action = file_menu.addAction("Save File")
+        save_action.setShortcut("Ctrl+S")
         save_action.triggered.connect(self.save_file)
+        
+        return file_menu
+
+    def on_new_project(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder for New Project")
+        if folder:
+            self.console_text.append(f"[System] Setting up new project in: {folder}")
+            self.project_dir = folder
+            
+            # Setup environment worker
+            self.env_worker = EnvSetupWorker(folder)
+            self.env_worker.log.connect(self.console_text.append)
+            self.env_worker.finished.connect(self.on_env_setup_finished)
+            self.env_worker.start()
+            
+            # Open the folder immediately to show the tree
+            self._do_open_folder(folder)
+
+    def on_env_setup_finished(self, success):
+        if success:
+            self.console_text.append("[System] Project environment setup successfully.")
+            self.statusBar().showMessage("Project Ready", 5000)
+        else:
+            self.console_text.append("[Error] Project environment setup failed.")
+            self.statusBar().showMessage("Setup Failed", 5000)
 
     def new_file(self):
         file_path, _ = QFileDialog.getSaveFileName(self, "Create New File", "", "Python Files (*.py);;All Files (*)")
@@ -187,18 +229,23 @@ class SikuliPyMainWindow(QMainWindow):
             except Exception as e:
                 self.console_text.append(f"[Error] Could not create file: {e}")
 
-    def open_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Project Folder")
+    def open_folder(self, folder=None):
+        if not folder:
+            folder = QFileDialog.getExistingDirectory(self, "Select Project Folder")
+        
         if folder:
-            self.file_model = QFileSystemModel()
-            self.file_model.setRootPath(folder)
-            self.file_tree.setModel(self.file_model)
-            self.file_tree.setRootIndex(self.file_model.index(folder))
-            self.project_dir = folder
-            # Hide some columns for better view (size, type, date modified)
-            for i in range(1, 4):
-                self.file_tree.hideColumn(i)
+            self._do_open_folder(folder)
             self.console_text.append(f"[System] Opened folder: {folder}")
+
+    def _do_open_folder(self, folder):
+        self.file_model = QFileSystemModel()
+        self.file_model.setRootPath(folder)
+        self.file_tree.setModel(self.file_model)
+        self.file_tree.setRootIndex(self.file_model.index(folder))
+        self.project_dir = folder
+        # Hide some columns for better view (size, type, date modified)
+        for i in range(1, 4):
+            self.file_tree.hideColumn(i)
 
     def save_file(self):
         if self.current_file:

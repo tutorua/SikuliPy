@@ -204,13 +204,22 @@ class TextAssertion:
 - Input: page object module path, list of elements.
 - Output: `tests/test_<page_name>.py` with a `pytest.fixture` for Playwright and one test method per assertion method in the page object.
 
-### Step 6 — IDE Integration (Generate Tests Button)
+### Step 6 — IDE Integration (Generate Tests & New Project)
 - Wire the **Take ElsScrht** button (in "Generate Tests" mode) to:
   1. Save baseline images as before.
   2. Call `pom_generator.py` → write/overwrite `pages/<name>_page.py`.
   3. Call `test_generator.py` → write/overwrite `tests/test_<name>.py`.
   4. Generate `sikulipy_config.py` if absent.
-  5. Log all generated file paths in the console.
+  5. Copy `sikulipy_testing.py` to project root to make tests self-contained.
+  6. Log all generated file paths in the console.
+
+- Update **📄 New Project** (Main Menu/Toolbar) to:
+  1. Prompt for a target directory.
+  2. Generate `pyproject.toml` with dependencies (pytest, playwright, allure-pytest, opencv, etc.).
+  3. Generate `pytest.ini` with Allure configuration (`--alluredir=allure-results`).
+  4. Run `uv sync` to initialize the virtual environment.
+  5. Run `playwright install chromium` to ensure browsers are ready.
+  6. Perform all steps in a background thread with real-time console logging.
 
 ---
 

@@ -60,6 +60,60 @@ def generate_page_object(project_dir: str, page_name: str, url: str, elements: l
         f'',
         f'',
         f'class {cls}:',
+    ]
+
+    # Group elements by category for readable output
+    from collections import defaultdict
+    by_category = defaultdict(list)
+    name_counts = {}  # track duplicate names
+    
+    # Process elements once to build constants and method data
+    processed_categories = defaultdict(list)
+    
+    for el in elements:
+        category = el['category']
+        display = el['text'] if el['text'] else el.get('ariaLabel', '')
+        fallback = f"{category.lower()}_{len(by_category[category])}"
+        name = _safe_name(display, fallback)
+
+        # Deduplicate names
+        if name in name_counts:
+            name_counts[name] += 1
+            name = f"{name}_{name_counts[name]}"
+        else:
+            name_counts[name] = 0
+            
+        by_category[category].append(name) # dummy for counting per category
+
+        asset = el.get('_asset_path', f"TBD_ASSET_PATH_{name}")
+        
+        # Define constant names
+        const_base = name.upper()
+        const_img = f"{const_base}_IMG"
+        const_loc = f"{const_base}_LOCATOR"
+        const_text = f"{const_base}_TEXT" if display else None
+        
+        processed_categories[category].append({
+            'name': name,
+            'display': display,
+            'asset': asset,
+            'const_img': const_img,
+            'const_loc': const_loc,
+            'const_text': const_text
+        })
+
+    # Add constants section
+    for category, items in processed_categories.items():
+        lines.append(f'    # --- Constants for {category} ---')
+        for item in items:
+            lines.append(f'    {item["const_img"]} = "{item["asset"]}"')
+            lines.append(f'    {item["const_loc"]} = "TBD_SELECTOR_{item["name"]}"')
+            if item["const_text"]:
+                lines.append(f'    {item["const_text"]} = "TBD_EXPECTED_{item["name"].upper()}"')
+        lines.append('')
+
+    # Add constructor and navigation
+    lines += [
         f'    def __init__(self, page: Page):',
         f'        self.page = page',
         f'',
@@ -68,56 +122,41 @@ def generate_page_object(project_dir: str, page_name: str, url: str, elements: l
         f'',
     ]
 
-    # Group elements by category for readable output
-    from collections import defaultdict
-    by_category = defaultdict(list)
-    name_counts = {}  # track duplicate method names
-
-    for el in elements:
-        by_category[el['category']].append(el)
-
-    for category, els in by_category.items():
-        lines.append(f'    # --- {category} ---')
-        for i, el in enumerate(els):
-            display = el['text'] if el['text'] else el.get('ariaLabel', '')
-            fallback = f"{el['category'].lower()}_{i}"
-            name = _safe_name(display, fallback)
-
-            # Deduplicate method names within the class
-            if name in name_counts:
-                name_counts[name] += 1
-                name = f"{name}_{name_counts[name]}"
-            else:
-                name_counts[name] = 0
-
-            asset = el.get('_asset_path', f"TBD_ASSET_PATH_{name}")
+    # Add methods section
+    for category, items in processed_categories.items():
+        lines.append(f'    # --- Methods for {category} ---')
+        for item in items:
+            name = item['name']
+            const_img = f"self.{item['const_img']}"
+            const_loc = f"self.{item['const_loc']}"
+            const_text = f"self.{item['const_text']}" if item['const_text'] else None
 
             # click method
             lines += [
                 f'',
                 f'    def click_{name}(self):',
-                f'        # TODO: fill in the CSS/XPath selector',
-                f'        self.page.click("TBD_SELECTOR_{name}")',
+                f'        # TODO: fill in the CSS/XPath selector in {item["const_loc"]}',
+                f'        self.page.click({const_loc})',
                 f'        # Alternatively, use image-based click (uncomment below):',
-                f'        # ImageAssertion.click(self.page, "{asset}")',
+                f'        # ImageAssertion.click(self.page, {const_img})',
             ]
 
             # assert visible method
             lines += [
                 f'',
                 f'    def assert_{name}_visible(self):',
-                f'        ImageAssertion.assert_present(self.page, "{asset}")',
+                f'        ImageAssertion.assert_present(self.page, {const_img})',
             ]
 
             # assert text method — only if element has a text label
-            if display:
+            if item['display']:
                 lines += [
                     f'',
                     f'    def assert_{name}_text(self):',
                     f'        TextAssertion.assert_text(',
                     f'            self.page,',
-                    f'            "{asset}",',
-                    f'            expected="TBD_EXPECTED_{name.upper()}"',
+                    f'            {const_img},',
+                    f'            expected={const_text}',
                     f'        )',
                 ]
 
