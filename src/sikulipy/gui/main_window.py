@@ -581,12 +581,11 @@ class SikuliPyMainWindow(QMainWindow):
         self.preview_dock.setWindowTitle("Web Inspector")
 
     def on_web_generate_tests(self):
-        # Save any unchecked images for selected elements, then generate POM/tests
+        # Save selected element images and generate POM/tests
         if not hasattr(self, 'web_pane') or not hasattr(self, 'web_canvas'):
             self.console_text.append("[Error] Web Inspector components not initialized.")
             return
 
-        update_mode = self.web_pane.rb_update.isChecked()
         # derive page name from URL
         from urllib.parse import urlparse
         url = getattr(self, 'web_inspector_url', 'page')
@@ -633,10 +632,7 @@ class SikuliPyMainWindow(QMainWindow):
                 cat_dir = os.path.join(self.project_dir, 'assets', category)
                 os.makedirs(cat_dir, exist_ok=True)
 
-                if update_mode:
-                    filename = f'{safe_text}_{i}.png'
-                else:
-                    filename = f'{safe_text}_{timestamp}_{i}.png'
+                filename = f'{safe_text}_{timestamp}_{i}.png'
 
                 filepath = os.path.join(cat_dir, filename)
                 el_pixmap.save(filepath, 'PNG')
@@ -649,8 +645,8 @@ class SikuliPyMainWindow(QMainWindow):
 
         self.console_text.append(f"[System] Ensured {len(captured_elements)} element image(s) saved.")
 
-        # Generate POM and tests (unless in Update Baseline mode)
-        if not update_mode and captured_elements:
+        # Generate POM and tests
+        if captured_elements:
             try:
                 from sikulipy.codegen.pom_generator import generate_page_object
                 from sikulipy.codegen.test_generator import generate_test_file
@@ -699,8 +695,6 @@ class SikuliPyMainWindow(QMainWindow):
 
             except Exception as e:
                 self.console_text.append(f'[Error] Code generation failed: {e}')
-        elif update_mode:
-            self.console_text.append('[System] Update Baseline mode — generation skipped.')
 
     def on_web_pane_apply_filters(self, active_categories):
         filtered_els = [el for el in self.all_web_elements if el['category'] in active_categories]
@@ -733,7 +727,6 @@ class SikuliPyMainWindow(QMainWindow):
         import os, time, re
         from urllib.parse import urlparse
 
-        update_mode = self.web_pane.rb_update.isChecked()
         timestamp = int(time.time())
         count = 0
         captured_elements = []   # will carry '_asset_path' for codegen
@@ -775,11 +768,7 @@ class SikuliPyMainWindow(QMainWindow):
             cat_dir = os.path.join(self.project_dir, 'assets', category)
             os.makedirs(cat_dir, exist_ok=True)
 
-            if update_mode:
-                # In Update Baseline mode: no timestamp → overwrites existing baseline
-                filename = f'{safe_text}_{i}.png'
-            else:
-                filename = f'{safe_text}_{timestamp}_{i}.png'
+            filename = f'{safe_text}_{timestamp}_{i}.png'
 
             filepath = os.path.join(cat_dir, filename)
             el_pixmap.save(filepath, 'PNG')
@@ -793,5 +782,3 @@ class SikuliPyMainWindow(QMainWindow):
             f'[System] Saved {count} selected element image(s) into assets/ category subfolders.'
         )
 
-        if update_mode:
-            self.console_text.append('[System] Update Baseline mode selected — existing names may be overwritten.')

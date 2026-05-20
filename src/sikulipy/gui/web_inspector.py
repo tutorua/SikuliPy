@@ -2,7 +2,7 @@ import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox, 
     QListWidget, QLabel, QGraphicsView, QGraphicsScene, 
-    QGraphicsRectItem, QListWidgetItem, QRadioButton, QButtonGroup, QFrame
+    QGraphicsRectItem, QListWidgetItem, QFrame
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QRectF
 from PyQt6.QtGui import QPixmap, QColor, QPen, QImage, QPainter
@@ -253,25 +253,6 @@ class WebInspectorPane(QWidget):
         btn_layout.addWidget(self.generate_btn)
         btn_layout.addWidget(self.close_btn)
         layout.addLayout(btn_layout)
-        
-        # --- Mode selection ---
-        mode_frame = QFrame()
-        mode_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        mode_frame.setStyleSheet("border: 1px solid #555; border-radius: 3px; padding: 2px;")
-        mode_layout = QHBoxLayout(mode_frame)
-        mode_layout.setContentsMargins(4, 2, 4, 2)
-        
-        self.rb_generate = QRadioButton("Generate Tests")
-        self.rb_update = QRadioButton("Update Baseline")
-        self.rb_generate.setChecked(True)
-        
-        self.mode_group = QButtonGroup(self)
-        self.mode_group.addButton(self.rb_generate, 0)
-        self.mode_group.addButton(self.rb_update, 1)
-        
-        mode_layout.addWidget(self.rb_generate)
-        mode_layout.addWidget(self.rb_update)
-        layout.addWidget(mode_frame)
         
         self.list_widget = QListWidget()
         self.list_widget.itemClicked.connect(self._on_list_clicked)
