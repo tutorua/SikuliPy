@@ -37,7 +37,8 @@ class SikuliPyMainWindow(QMainWindow):
 
         self.current_file = None
         self.file_model = None
-        self.project_dir = os.getcwd()
+        # Project not set until user creates/opens one via File menu
+        self.project_dir = None
 
         self.setup_ui()
         # Menu is now integrated into the toolbar via create_file_menu called in setup_ui
@@ -97,7 +98,12 @@ class SikuliPyMainWindow(QMainWindow):
 
         # Toolbar
         self.toolbar = QToolBar("Main Toolbar")
-        self.toolbar.setStyleSheet("background-color: #3C3C3C; color: white; border: none; padding: 2px;")
+        self.toolbar.setStyleSheet(
+            "QToolBar { background-color: #3C3C3C; color: #CCCCCC; border: none; padding: 2px; } "
+            "QToolBar QToolButton { color: #CCCCCC; background: transparent; border: none; padding: 4px 6px; } "
+            "QToolBar QToolButton:disabled { color: #808080; } "
+            "QToolBar QToolButton:hover { background: transparent; }"
+        )
         self.addToolBar(self.toolbar)
         
         # File Menu as a Button in the Toolbar
@@ -107,7 +113,7 @@ class SikuliPyMainWindow(QMainWindow):
         file_btn.setMenu(self.file_menu)
         file_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         file_btn.setStyleSheet("""
-            QToolButton { padding: 4px; background-color: #3C3C3C; color: white; border: none; }
+            QToolButton { padding: 4px; background: transparent; color: #CCCCCC; border: none; }
             QToolButton::menu-indicator { image: none; width: 0px; }
         """)
         self.toolbar.addWidget(file_btn)
@@ -126,7 +132,8 @@ class SikuliPyMainWindow(QMainWindow):
         self.stop_action.triggered.connect(self.stop_script)
         self.stop_action.setEnabled(False)
         self.toolbar.addSeparator()
-        self.toolbar.addAction("📷 Capture Screen")
+        self.capture_screen_action = self.toolbar.addAction("📷 Capture Screen")
+        # Capture screen/region require a project folder (for asset storage)
         self.capture_action = self.toolbar.addAction("✂ Capture Region")
         self.capture_action.triggered.connect(self.start_region_capture)
         self.toolbar.addSeparator()
@@ -137,10 +144,24 @@ class SikuliPyMainWindow(QMainWindow):
         docs_action = self.toolbar.addAction("📚 Docs")
         docs_action.triggered.connect(self.open_docs)
 
+        # Disable actions that require a project until one is opened/created
+        self.enable_project_actions(False)
+
         # Status Bar
         self.setStatusBar(QStatusBar())
         self.statusBar().setStyleSheet("background-color: #007ACC; color: white;")
         self.statusBar().showMessage("Ready")
+
+    def enable_project_actions(self, enabled: bool):
+        self.run_action.setEnabled(enabled)
+        # Stop remains disabled unless a process is running
+        if not enabled:
+            self.stop_action.setEnabled(False)
+        self.capture_action.setEnabled(enabled)
+        try:
+            self.capture_screen_action.setEnabled(enabled)
+        except AttributeError:
+            pass
 
     def open_recorder(self):
         if not hasattr(self, 'recorder_dialog') or not self.recorder_dialog.isVisible():
@@ -195,20 +216,26 @@ class SikuliPyMainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "Select Folder for New Project")
         if folder:
             self.console_text.append(f"[System] Setting up new project in: {folder}")
-            self.project_dir = folder
-            
+            # Store pending folder and start environment setup. Do NOT open folder
+            # nor enable project actions until setup finishes.
+            self._pending_project_folder = folder
+
             # Setup environment worker
             self.env_worker = EnvSetupWorker(folder)
             self.env_worker.log.connect(self.console_text.append)
             self.env_worker.finished.connect(self.on_env_setup_finished)
             self.env_worker.start()
-            
-            # Open the folder immediately to show the tree
-            self._do_open_folder(folder)
 
     def on_env_setup_finished(self, success):
         if success:
             self.console_text.append("[System] Project environment setup successfully.")
+            # Open the folder now that environment is ready and enable actions
+            pending = getattr(self, '_pending_project_folder', None)
+            if pending:
+                self._do_open_folder(pending)
+                self.enable_project_actions(True)
+                del self._pending_project_folder
+
             self.statusBar().showMessage("Project Ready", 5000)
         else:
             self.console_text.append("[Error] Project environment setup failed.")
@@ -235,6 +262,8 @@ class SikuliPyMainWindow(QMainWindow):
         
         if folder:
             self._do_open_folder(folder)
+            # For existing folders assume environment is ready and enable actions
+            self.enable_project_actions(True)
             self.console_text.append(f"[System] Opened folder: {folder}")
 
     def _do_open_folder(self, folder):
@@ -246,6 +275,8 @@ class SikuliPyMainWindow(QMainWindow):
         # Hide some columns for better view (size, type, date modified)
         for i in range(1, 4):
             self.file_tree.hideColumn(i)
+        # Enable actions that require a project folder
+        self.enable_project_actions(True)
 
     def save_file(self):
         if self.current_file:

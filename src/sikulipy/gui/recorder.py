@@ -1,6 +1,8 @@
+import os
+
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, 
-    QPushButton, QLineEdit, QLabel, QCheckBox, QRadioButton, QComboBox, QInputDialog
+    QPushButton, QLineEdit, QLabel, QCheckBox, QRadioButton, QComboBox, QInputDialog, QTextEdit, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -86,7 +88,7 @@ class RecorderDialog(QDialog):
         super().__init__(parent)
         self.editor = editor
         self.setWindowTitle("Interactive Action Recorder")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(600)
         
         # Always on top
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
@@ -101,6 +103,7 @@ class RecorderDialog(QDialog):
         self.setup_image_tab()
         self.setup_text_tab()
         self.setup_keyboard_tab()
+        self.setup_api_tab()
         
         # Close button at the bottom
         close_btn = QPushButton("Close")
@@ -204,6 +207,234 @@ class RecorderDialog(QDialog):
         layout.addStretch()
         
         self.tabs.addTab(tab, "Keyboard")
+
+    def setup_api_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        self.api_base_url_edit = QLineEdit()
+        self.api_base_url_edit.setPlaceholderText("Base URL (e.g. https://api.example.com)")
+        layout.addWidget(QLabel("Base URL:"))
+        layout.addWidget(self.api_base_url_edit)
+
+        self.api_endpoint_edit = QLineEdit()
+        self.api_endpoint_edit.setPlaceholderText("Endpoint path (e.g. /users)")
+        layout.addWidget(QLabel("Endpoint:"))
+        layout.addWidget(self.api_endpoint_edit)
+
+        self.api_method_combo = QComboBox()
+        self.api_method_combo.addItems(["GET", "POST", "PUT", "PATCH", "DELETE"])
+        layout.addWidget(QLabel("HTTP Method:"))
+        layout.addWidget(self.api_method_combo)
+
+        self.api_headers_edit = QTextEdit()
+        self.api_headers_edit.setPlaceholderText("Header-Name: value\nAuthorization: Bearer ...")
+        self.api_headers_edit.setFixedHeight(80)
+        layout.addWidget(QLabel("Headers (one per line):"))
+        layout.addWidget(self.api_headers_edit)
+
+        self.api_params_edit = QTextEdit()
+        self.api_params_edit.setPlaceholderText("param1=value1\nparam2=value2")
+        self.api_params_edit.setFixedHeight(80)
+        layout.addWidget(QLabel("Query Parameters (one per line):"))
+        layout.addWidget(self.api_params_edit)
+
+        self.api_body_edit = QTextEdit()
+        self.api_body_edit.setPlaceholderText('{"key": "value"}')
+        self.api_body_edit.setFixedHeight(120)
+        layout.addWidget(QLabel("JSON Body (optional):"))
+        layout.addWidget(self.api_body_edit)
+
+        self.api_test_name_edit = QLineEdit("test_api_request")
+        layout.addWidget(QLabel("Pytest Function Name:"))
+        layout.addWidget(self.api_test_name_edit)
+
+        generate_btn = QPushButton("Generate API Test")
+        generate_btn.clicked.connect(self.on_generate_api_test)
+        layout.addWidget(generate_btn)
+
+        save_btn = QPushButton("Save API Test File")
+        save_btn.clicked.connect(self.on_save_api_test_file)
+        layout.addWidget(save_btn)
+
+        layout.addStretch()
+        self.tabs.addTab(tab, "API")
+
+    def _parse_key_value_text(self, text):
+        data = {}
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            if ':' in line:
+                key, value = line.split(':', 1)
+            elif '=' in line:
+                key, value = line.split('=', 1)
+            else:
+                continue
+            data[key.strip()] = value.strip()
+        return data
+
+    def _format_dict_literal(self, data):
+        if not data:
+            return "{}"
+        import json
+        return json.dumps(data, indent=4)
+
+    def _build_api_test_snippet(
+        self,
+        url,
+        method,
+        headers,
+        params,
+        body,
+        test_name,
+    ):
+        import json
+
+        lines = [
+            "import json",
+            "import urllib.request",
+            "import urllib.parse",
+            "",
+            f"def {test_name}():",
+            f"    url = \"{url}\"",
+        ]
+
+        if params:
+            lines += [
+                f"    params = {json.dumps(params, indent=4)}",
+                "    query = urllib.parse.urlencode(params)",
+                "    url = url + '?' + query",
+            ]
+
+        if headers:
+            lines.append(f"    headers = {json.dumps(headers, indent=4)}")
+        else:
+            lines.append("    headers = {}")
+
+        if body is not None:
+            lines += [
+                f"    body = json.dumps({json.dumps(body, indent=4)})",
+                "    data = body.encode('utf-8')",
+            ]
+        else:
+            lines.append("    data = None")
+
+        request_args = ["url", "headers=headers", f"method=\"{method}\"" ]
+        if body is not None:
+            request_args.append("data=data")
+
+        lines += [
+            f"    req = urllib.request.Request({', '.join(request_args)})",
+            "    with urllib.request.urlopen(req) as response:",
+            "        assert response.status == 200",
+            "        raw = response.read().decode('utf-8')",
+            "        if raw:",
+            "            try:",
+            "                data = json.loads(raw)",
+            "            except ValueError:",
+            "                data = raw",
+            "            assert data is not None",
+        ]
+
+        return '\n'.join(lines)
+
+    def _collect_api_test_data(self):
+        base_url = self.api_base_url_edit.text().strip()
+        endpoint = self.api_endpoint_edit.text().strip()
+        method = self.api_method_combo.currentText()
+        test_name = self.api_test_name_edit.text().strip() or "test_api_request"
+
+        if not base_url or not endpoint:
+            QMessageBox.warning(self, "API Test Generator", "Please enter both Base URL and Endpoint.")
+            return None
+
+        if endpoint.startswith("/"):
+            endpoint = endpoint[1:]
+
+        url = base_url.rstrip("/") + "/" + endpoint
+        headers = self._parse_key_value_text(self.api_headers_edit.toPlainText())
+        params = self._parse_key_value_text(self.api_params_edit.toPlainText())
+
+        body_text = self.api_body_edit.toPlainText().strip()
+        body = None
+        if body_text:
+            try:
+                import json
+                body = json.loads(body_text)
+            except Exception:
+                QMessageBox.warning(self, "API Test Generator", "JSON Body is invalid. Please enter valid JSON.")
+                return None
+
+        return {
+            "url": url,
+            "method": method,
+            "headers": headers,
+            "params": params,
+            "body": body,
+            "test_name": test_name,
+        }
+
+    def _safe_test_file_name(self, test_name):
+        import re
+        safe_name = re.sub(r"[^0-9a-zA-Z_]+", "_", test_name.strip())
+        if not safe_name:
+            safe_name = "test_api_request"
+        if not safe_name.startswith("test_"):
+            safe_name = f"test_{safe_name}"
+        return safe_name + ".py"
+
+    def _get_project_dir(self):
+        if self.parent() is not None and hasattr(self.parent(), "project_dir"):
+            return getattr(self.parent(), "project_dir")
+        return None
+
+    def on_generate_api_test(self):
+        data = self._collect_api_test_data()
+        if data is None:
+            return
+
+        snippet = self._build_api_test_snippet(**data)
+        self.insert_code(snippet)
+        QMessageBox.information(self, "API Test Generated", "API test template inserted into the editor.")
+
+    def on_save_api_test_file(self):
+        data = self._collect_api_test_data()
+        if data is None:
+            return
+
+        project_dir = self._get_project_dir()
+        if not project_dir:
+            QMessageBox.warning(self, "API Test Generator", "Unable to determine project directory. Save failed.")
+            return
+
+        tests_dir = os.path.join(project_dir, "tests")
+        os.makedirs(tests_dir, exist_ok=True)
+        init_file = os.path.join(tests_dir, "__init__.py")
+        if not os.path.exists(init_file):
+            open(init_file, "w", encoding="utf-8").close()
+
+        file_name = self._safe_test_file_name(data["test_name"])
+        file_path = os.path.join(tests_dir, file_name)
+
+        if os.path.exists(file_path):
+            result = QMessageBox.question(
+                self,
+                "Overwrite Test File?",
+                f"The file {file_name} already exists. Overwrite?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if result != QMessageBox.StandardButton.Yes:
+                return
+
+        snippet = self._build_api_test_snippet(**data)
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(snippet + "\n")
+            QMessageBox.information(self, "API Test Saved", f"API test saved to {file_path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Save Failed", f"Could not save API test file: {exc}")
 
     def prompt_and_insert(self, title, label, template):
         text, ok = QInputDialog.getText(self, title, label)
