@@ -572,12 +572,135 @@ class SikuliPyMainWindow(QMainWindow):
         self.web_pane.listItemSelected.connect(self.web_canvas.select_element_by_id)
         self.web_pane.itemCheckChanged.connect(self.web_canvas.set_rect_visible)
         self.web_pane.takeScreenshot.connect(self.on_web_take_screenshot)
+        self.web_pane.generateTests.connect(self.on_web_generate_tests)
         
         self.web_canvas.elementClicked.connect(lambda el: self.web_pane.select_list_item(el['id']))
         self.web_canvas.elementClicked.connect(lambda el: self.web_pane.set_preview_image(self.web_canvas.get_selected_pixmap()))
         
         self.preview_dock.setWidget(self.web_pane)
         self.preview_dock.setWindowTitle("Web Inspector")
+
+    def on_web_generate_tests(self):
+        # Save any unchecked images for selected elements, then generate POM/tests
+        if not hasattr(self, 'web_pane') or not hasattr(self, 'web_canvas'):
+            self.console_text.append("[Error] Web Inspector components not initialized.")
+            return
+
+        update_mode = self.web_pane.rb_update.isChecked()
+        # derive page name from URL
+        from urllib.parse import urlparse
+        url = getattr(self, 'web_inspector_url', 'page')
+        parsed = urlparse(url)
+        raw = parsed.netloc.replace('www.', '') + parsed.path
+        import re, time, os
+        page_name = re.sub(r'[^a-z0-9]+', '_', raw.lower()).strip('_') or 'page'
+        timestamp = int(time.time())
+
+        captured_elements = []
+        count = 0
+
+        for i in range(self.web_pane.list_widget.count()):
+            item = self.web_pane.list_widget.item(i)
+            if item.checkState() != Qt.CheckState.Checked:
+                continue
+
+            el_id = item.data(Qt.ItemDataRole.UserRole)
+            category = item.data(Qt.ItemDataRole.UserRole + 1)
+
+            rect_item = next(
+                (r for r in self.web_canvas.rect_items if r.element_data['id'] == el_id),
+                None
+            )
+            if not rect_item:
+                continue
+
+            el_data = rect_item.element_data
+            # If asset not present or file missing, save now
+            need_save = ('_asset_path' not in el_data) or (not os.path.exists(os.path.join(self.project_dir, el_data.get('_asset_path', ''))))
+            if need_save:
+                rect = rect_item.rect()
+                el_pixmap = self.web_canvas.full_pixmap.copy(
+                    int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
+                )
+
+                source_text = el_data['text'] if el_data['text'] else el_data.get('ariaLabel', '')
+                safe_text = ''.join(
+                    c for c in source_text if c.isalnum() or c in (' ', '_', '-')
+                ).strip()[:20].replace(' ', '_')
+                if not safe_text:
+                    safe_text = f'el_{i}'
+
+                cat_dir = os.path.join(self.project_dir, 'assets', category)
+                os.makedirs(cat_dir, exist_ok=True)
+
+                if update_mode:
+                    filename = f'{safe_text}_{i}.png'
+                else:
+                    filename = f'{safe_text}_{timestamp}_{i}.png'
+
+                filepath = os.path.join(cat_dir, filename)
+                el_pixmap.save(filepath, 'PNG')
+                rel_path = f'assets/{category}/{filename}'
+                el_data['_asset_path'] = rel_path
+                captured_elements.append(el_data)
+                count += 1
+            else:
+                captured_elements.append(el_data)
+
+        self.console_text.append(f"[System] Ensured {len(captured_elements)} element image(s) saved.")
+
+        # Generate POM and tests (unless in Update Baseline mode)
+        if not update_mode and captured_elements:
+            try:
+                from sikulipy.codegen.pom_generator import generate_page_object
+                from sikulipy.codegen.test_generator import generate_test_file
+
+                pom_path = generate_page_object(
+                    project_dir=self.project_dir,
+                    page_name=page_name,
+                    url=url,
+                    elements=captured_elements,
+                )
+                test_path = generate_test_file(
+                    project_dir=self.project_dir,
+                    page_name=page_name,
+                    url=url,
+                    elements=captured_elements,
+                )
+
+                # Ensure sikulipy_config.py exists
+                config_dest = os.path.join(self.project_dir, 'sikulipy_config.py')
+                if not os.path.exists(config_dest):
+                    import shutil, inspect
+                    from sikulipy.codegen import config_template
+                    shutil.copy(inspect.getfile(config_template), config_dest)
+                    self.console_text.append(f'[System] Created config: {config_dest}')
+
+                # Copy testing helpers
+                import shutil, inspect
+                import sikulipy.testing as _testing_module
+                testing_src = inspect.getfile(_testing_module)
+                testing_dest = os.path.join(self.project_dir, 'sikulipy_testing.py')
+                shutil.copy(testing_src, testing_dest)
+                self.console_text.append(f'[System] Copied testing helpers → {testing_dest}')
+
+                self.console_text.append(f'[System] Page Object  → {pom_path}')
+                self.console_text.append(f'[System] Test file    → {test_path}')
+                self.console_text.append(f'[System] Run tests with: pytest {os.path.relpath(test_path, self.project_dir)} -v')
+
+                # Insert click snippet for currently selected element if present
+                if self.web_canvas.selected_rect:
+                    sel = self.web_canvas.selected_rect.element_data
+                    if '_asset_path' in sel:
+                        rel = sel['_asset_path']
+                        cursor = self.editor.textCursor()
+                        cursor.insertText(f'click("{rel}")\n')
+                        self.console_text.append(f'[System] Inserted click action: {rel}')
+
+            except Exception as e:
+                self.console_text.append(f'[Error] Code generation failed: {e}')
+        elif update_mode:
+            self.console_text.append('[System] Update Baseline mode — generation skipped.')
 
     def on_web_pane_apply_filters(self, active_categories):
         filtered_els = [el for el in self.all_web_elements if el['category'] in active_categories]

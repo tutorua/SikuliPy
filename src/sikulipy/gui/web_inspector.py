@@ -184,6 +184,7 @@ class WebInspectorCanvas(QGraphicsView):
 class WebInspectorPane(QWidget):
     applyFilters = pyqtSignal(list)
     takeScreenshot = pyqtSignal()
+    generateTests = pyqtSignal()
     closeInspector = pyqtSignal()
     listItemSelected = pyqtSignal(str)
     itemCheckChanged = pyqtSignal(str, bool)
@@ -240,12 +241,16 @@ class WebInspectorPane(QWidget):
         
         self.take_btn = QPushButton("Take ElsScrht")
         self.take_btn.clicked.connect(self.takeScreenshot.emit)
+
+        self.generate_btn = QPushButton("Generate Tests")
+        self.generate_btn.clicked.connect(self.generateTests.emit)
         
         self.close_btn = QPushButton("Close")
         self.close_btn.clicked.connect(self.closeInspector.emit)
         
         btn_layout.addWidget(self.apply_btn)
         btn_layout.addWidget(self.take_btn)
+        btn_layout.addWidget(self.generate_btn)
         btn_layout.addWidget(self.close_btn)
         layout.addLayout(btn_layout)
         
