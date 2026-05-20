@@ -132,16 +132,16 @@ class SikuliPyMainWindow(QMainWindow):
         self.stop_action.triggered.connect(self.stop_script)
         self.stop_action.setEnabled(False)
         self.toolbar.addSeparator()
-        self.capture_screen_action = self.toolbar.addAction("📷 Capture Screen")
+        self.capture_screen_action = self.toolbar.addAction(self.create_text_icon("📷", "#CCCCCC"), "Capture Screen")
         # Capture screen/region require a project folder (for asset storage)
-        self.capture_action = self.toolbar.addAction("✂ Capture Region")
+        self.capture_action = self.toolbar.addAction(self.create_crop_icon("#CCCCCC"), "Capture Region")
         self.capture_action.triggered.connect(self.start_region_capture)
         self.toolbar.addSeparator()
-        self.toolbar.addAction("📱 Device")
-        self.record_action = self.toolbar.addAction("⏺ Record")
+        self.toolbar.addAction(self.create_text_icon("📱", "#CCCCCC"), "Device")
+        self.record_action = self.toolbar.addAction(self.create_text_icon("⏺", "#CCCCCC"), "Record")
         self.record_action.triggered.connect(self.open_recorder)
         self.toolbar.addSeparator()
-        docs_action = self.toolbar.addAction("📚 Docs")
+        docs_action = self.toolbar.addAction(self.create_text_icon("📚", "#CCCCCC"), "Docs")
         docs_action.triggered.connect(self.open_docs)
 
         # Disable actions that require a project until one is opened/created
@@ -182,6 +182,41 @@ class SikuliPyMainWindow(QMainWindow):
         font.setPixelSize(18)
         painter.setFont(font)
         painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, text)
+        painter.end()
+        return QIcon(pixmap)
+
+    def create_crop_icon(self, color_name="#CCCCCC"):
+        from PyQt6.QtGui import QPixmap, QPainter, QColor, QIcon, QPen
+        from PyQt6.QtCore import Qt
+        size = 24
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(color_name))
+        pen.setWidth(2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+
+        margin = 4
+        length = 8
+        # Top-left corner
+        painter.drawLine(margin, margin, margin + length, margin)
+        painter.drawLine(margin, margin, margin, margin + length)
+        # Top-right corner
+        tr_x = size - margin
+        painter.drawLine(tr_x - length, margin, tr_x, margin)
+        painter.drawLine(tr_x, margin, tr_x, margin + length)
+        # Bottom-left corner
+        bl_y = size - margin
+        painter.drawLine(margin, bl_y - length, margin, bl_y)
+        painter.drawLine(margin, bl_y, margin + length, bl_y)
+        # Bottom-right corner
+        br_x = size - margin
+        br_y = size - margin
+        painter.drawLine(br_x - length, br_y, br_x, br_y)
+        painter.drawLine(br_x, br_y - length, br_x, br_y)
+
         painter.end()
         return QIcon(pixmap)
 
