@@ -666,61 +666,9 @@ class SikuliPyMainWindow(QMainWindow):
             el_data['_asset_path'] = rel_path
             captured_elements.append(el_data)
 
-            # Insert click snippet if this is the currently selected element
-            if (not update_mode and self.web_canvas.selected_rect
-                    and self.web_canvas.selected_rect.element_data['id'] == el_id):
-                code_str = f'click("{rel_path}")'
-                cursor = self.editor.textCursor()
-                cursor.insertText(code_str + '\n')
-                self.editor.setTextCursor(cursor)
-                self.console_text.append(f'[System] Inserted click action: {rel_path}')
-
         self.console_text.append(
-            f'[System] Saved {count} element(s) into assets/ category subfolders.'
+            f'[System] Saved {count} selected element image(s) into assets/ category subfolders.'
         )
 
-        # ---- Generate Tests mode: run POM + test file generators ----
-        if not update_mode and captured_elements:
-            try:
-                from sikulipy.codegen.pom_generator import generate_page_object
-                from sikulipy.codegen.test_generator import generate_test_file
-
-                pom_path = generate_page_object(
-                    project_dir=self.project_dir,
-                    page_name=page_name,
-                    url=url,
-                    elements=captured_elements,
-                )
-                test_path = generate_test_file(
-                    project_dir=self.project_dir,
-                    page_name=page_name,
-                    url=url,
-                    elements=captured_elements,
-                )
-
-                # Write sikulipy_config.py at project root if it doesn't exist
-                config_dest = os.path.join(self.project_dir, 'sikulipy_config.py')
-                if not os.path.exists(config_dest):
-                    import shutil, inspect
-                    from sikulipy.codegen import config_template
-                    shutil.copy(inspect.getfile(config_template), config_dest)
-                    self.console_text.append(f'[System] Created config: {config_dest}')
-
-                # Copy the testing helpers library into the project so tests are self-contained
-                import shutil, inspect
-                import sikulipy.testing as _testing_module
-                testing_src = inspect.getfile(_testing_module)
-                testing_dest = os.path.join(self.project_dir, 'sikulipy_testing.py')
-                shutil.copy(testing_src, testing_dest)
-                self.console_text.append(f'[System] Copied testing helpers → {testing_dest}')
-
-                self.console_text.append(f'[System] Page Object  → {pom_path}')
-                self.console_text.append(f'[System] Test file    → {test_path}')
-                self.console_text.append(
-                    f'[System] Run tests with: pytest {os.path.relpath(test_path, self.project_dir)} -v'
-                )
-
-            except Exception as e:
-                self.console_text.append(f'[Error] Code generation failed: {e}')
-        elif update_mode:
-            self.console_text.append('[System] Update Baseline mode — test files were NOT regenerated.')
+        if update_mode:
+            self.console_text.append('[System] Update Baseline mode selected — existing names may be overwritten.')
