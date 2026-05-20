@@ -18,6 +18,7 @@ class OverlayWidget(QWidget):
         self.end = None
         self.selecting = False
         self.on_captured = None
+        self.target_rect = None
 
         # cover virtual geometry
         screen = QtGui.QGuiApplication.primaryScreen()
@@ -27,8 +28,14 @@ class OverlayWidget(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        # dim whole desktop
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 160))
+        # If in screen mode and a target rect was provided, dim only that window area.
+        if self.mode == 'screen' and self.target_rect:
+            try:
+                # convert global rect to overlay-local
+                r = QRect(self.mapFromGlobal(self.target_rect.topLeft()), self.mapFromGlobal(self.target_rect.bottomRight())).normalized()
+                painter.fillRect(r, QColor(0, 0, 0, 160))
+            except Exception:
+                pass
 
         if self.mode == 'region' and self.start and self.end:
             r = QRect(self.mapFromGlobal(self.start), self.mapFromGlobal(self.end)).normalized()

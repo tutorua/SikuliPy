@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QDockWidget, QTextEdit, QTreeView, 
-    QLabel, QToolBar, QStatusBar, QFileDialog, QMessageBox,
+    QLabel, QToolBar, QStatusBar, QFileDialog, QMessageBox, QInputDialog,
     QWidget, QVBoxLayout, QListWidget, QHBoxLayout, QPushButton,
     QFrame, QRadioButton, QButtonGroup, QToolButton, QMenu
 )
@@ -205,7 +205,10 @@ class SikuliPyMainWindow(QMainWindow):
         app_name = self._get_foreground_app_name()
         self.console_text.append(f'[System] Target app: {app_name}')
 
+        # determine target window rect (global coords) and pass to overlay
+        target_rect = self._get_foreground_window_rect()
         overlay = OverlayWidget(mode=mode)
+        overlay.target_rect = target_rect
         def on_captured(pixmap):
             # Save and restore main window
             self._handle_captured_pixmap(pixmap, app_name)
@@ -237,6 +240,8 @@ class SikuliPyMainWindow(QMainWindow):
         safe_app = re.sub(r'[^a-z0-9]+', '_', (app_name or 'app').lower()).strip('_')
         default_name = default_template.format(app=safe_app, ts=ts)
 
+        # restore main window before asking for filename so dialog is visible
+        self.show(); self.raise_(); self.activateWindow()
         # Prompt filename
         name, ok = QInputDialog.getText(self, 'Save Screenshot', 'Filename (png):', text=default_name)
         if not ok:
@@ -286,6 +291,30 @@ class SikuliPyMainWindow(QMainWindow):
             return p.name()
         except Exception:
             return 'screen'
+
+    def _get_foreground_window_rect(self):
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            rect = ctypes.wintypes.RECT()
+            hwnd = user32.GetForegroundWindow()
+            res = user32.GetWindowRect(hwnd, ctypes.byref(rect))
+            if res:
+                left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
+                from PyQt6.QtCore import QRect, QPoint
+                return QRect(QPoint(left, top), QPoint(right, bottom))
+        except Exception:
+            pass
+        # fallback: use screen geometry around cursor
+        try:
+            from PyQt6 import QtGui
+            pos = QtGui.QCursor.pos()
+            screen = QtGui.QGuiApplication.screenAt(pos)
+            if screen:
+                return screen.geometry()
+        except Exception:
+            pass
+        return None
 
     def create_text_icon(self, text, color_name):
         from PyQt6.QtGui import QPixmap, QPainter, QColor, QIcon
