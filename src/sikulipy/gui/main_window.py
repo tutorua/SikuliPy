@@ -195,27 +195,22 @@ class SikuliPyMainWindow(QMainWindow):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         pen = QPen(QColor(color_name))
         pen.setWidth(2)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setCapStyle(Qt.PenCapStyle.SquareCap)
         painter.setPen(pen)
 
-        margin = 4
-        length = 8
-        # Top-left corner
+        margin = 3
+        length = 10
+        offset = 6
+
+        # Top-left right angle
         painter.drawLine(margin, margin, margin + length, margin)
         painter.drawLine(margin, margin, margin, margin + length)
-        # Top-right corner
-        tr_x = size - margin
-        painter.drawLine(tr_x - length, margin, tr_x, margin)
-        painter.drawLine(tr_x, margin, tr_x, margin + length)
-        # Bottom-left corner
-        bl_y = size - margin
-        painter.drawLine(margin, bl_y - length, margin, bl_y)
-        painter.drawLine(margin, bl_y, margin + length, bl_y)
-        # Bottom-right corner
+
+        # Bottom-right right angle (shifted inward to overlap)
         br_x = size - margin
         br_y = size - margin
-        painter.drawLine(br_x - length, br_y, br_x, br_y)
-        painter.drawLine(br_x, br_y - length, br_x, br_y)
+        painter.drawLine(br_x - length - offset, br_y - offset, br_x - offset, br_y - offset)
+        painter.drawLine(br_x - offset, br_y - length - offset, br_x - offset, br_y - offset)
 
         painter.end()
         return QIcon(pixmap)
