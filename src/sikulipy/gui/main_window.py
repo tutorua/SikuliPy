@@ -7,7 +7,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QFileSystemModel, QPixmap, QAction
 from PyQt6.QtCore import Qt, QProcess, pyqtSignal
 from sikulipy.gui.editor import PythonEditor
-from sikulipy.gui.overlay import RegionCaptureOverlay
+from sikulipy.gui.overlay import OverlayWidget
+from PyQt6.QtCore import QTimer, QEventLoop
+import time
+import re
+import pathlib
+import importlib
 from sikulipy.vision import VisionEngine
 from sikulipy.gui.recorder import RecorderDialog
 from sikulipy.gui.web_inspector import WebInspectorWorker, WebInspectorCanvas, WebInspectorPane
@@ -133,6 +138,7 @@ class SikuliPyMainWindow(QMainWindow):
         self.stop_action.setEnabled(False)
         self.toolbar.addSeparator()
         self.capture_screen_action = self.toolbar.addAction(self.create_text_icon("📷", "#CCCCCC"), "Capture Screen")
+        self.capture_screen_action.triggered.connect(self.start_screen_capture)
         # Capture screen/region require a project folder (for asset storage)
         self.capture_action = self.toolbar.addAction(self.create_crop_icon("#CCCCCC"), "Capture Region")
         self.capture_action.triggered.connect(self.start_region_capture)
@@ -169,6 +175,117 @@ class SikuliPyMainWindow(QMainWindow):
             self.recorder_dialog.imageActionRequested.connect(self.on_recorder_image_action)
             self.recorder_dialog.webAutoRequested.connect(self.on_web_auto_requested)
             self.recorder_dialog.show()
+
+    # ---------------- Capture helpers ----------------
+    def start_screen_capture(self):
+        # Hide main window to allow user to bring target app forward
+        try:
+            cfg = importlib.import_module('sikulipy.sikulipy_config')
+            delay = int(getattr(cfg, 'CAPTURE_DELAY_SECONDS', 2) * 1000)
+        except Exception:
+            delay = 2000
+
+        self.console_text.append('[System] Capture initiated — lowering application. Activate target window now...')
+        self.hide()
+        QTimer.singleShot(delay, lambda: self._begin_overlay('screen'))
+
+    def start_region_capture(self):
+        try:
+            cfg = importlib.import_module('sikulipy.sikulipy_config')
+            delay = int(getattr(cfg, 'CAPTURE_DELAY_SECONDS', 2) * 1000)
+        except Exception:
+            delay = 2000
+
+        self.console_text.append('[System] Region capture initiated — lowering application. Activate target window now...')
+        self.hide()
+        QTimer.singleShot(delay, lambda: self._begin_overlay('region'))
+
+    def _begin_overlay(self, mode):
+        # Attempt to determine foreground application name before overlay steals focus
+        app_name = self._get_foreground_app_name()
+        self.console_text.append(f'[System] Target app: {app_name}')
+
+        overlay = OverlayWidget(mode=mode)
+        def on_captured(pixmap):
+            # Save and restore main window
+            self._handle_captured_pixmap(pixmap, app_name)
+
+        overlay.on_captured = on_captured
+        overlay.show()
+        overlay.activateWindow()
+        self._active_overlay = overlay
+
+    def _handle_captured_pixmap(self, pixmap, app_name):
+        # ensure assets dir
+        try:
+            cfg = importlib.import_module('sikulipy.sikulipy_config')
+            assets_dir = getattr(cfg, 'ASSETS_DIR', 'assets/screenshots')
+            auto_insert = getattr(cfg, 'AUTO_INSERT_PATH', True)
+            ts_fmt = getattr(cfg, 'TIMESTAMP_FORMAT', '%Y%m%d_%H%M%S')
+            default_template = getattr(cfg, 'DEFAULT_FILENAME_TEMPLATE', '{app}_{ts}.png')
+        except Exception:
+            assets_dir = 'assets/screenshots'
+            auto_insert = True
+            ts_fmt = '%Y%m%d_%H%M%S'
+            default_template = '{app}_{ts}.png'
+
+        project_dir = getattr(self, 'project_dir', os.getcwd())
+        dest_dir = os.path.join(project_dir, assets_dir)
+        os.makedirs(dest_dir, exist_ok=True)
+
+        ts = time.strftime(ts_fmt)
+        safe_app = re.sub(r'[^a-z0-9]+', '_', (app_name or 'app').lower()).strip('_')
+        default_name = default_template.format(app=safe_app, ts=ts)
+
+        # Prompt filename
+        name, ok = QInputDialog.getText(self, 'Save Screenshot', 'Filename (png):', text=default_name)
+        if not ok:
+            self.console_text.append('[System] Capture cancelled by user.')
+            self.show(); self.raise_(); self.activateWindow()
+            return
+
+        filename = name.strip()
+        if not filename.lower().endswith('.png'):
+            filename = filename + '.png'
+
+        # sanitize
+        filename = re.sub(r'[\\/:*?"<>|]', '_', filename)
+        dest_path = os.path.join(dest_dir, filename)
+        base, ext = os.path.splitext(dest_path)
+        i = 1
+        while os.path.exists(dest_path):
+            dest_path = f"{base}_{i}{ext}"
+            i += 1
+
+        pixmap.save(dest_path, 'PNG')
+        rel_path = os.path.relpath(dest_path, project_dir).replace('\\', '/')
+        self.console_text.append(f'[System] Saved screenshot → {dest_path}')
+
+        if auto_insert and hasattr(self, 'editor'):
+            # Insert a click snippet to use captured image
+            try:
+                cursor = self.editor.textCursor()
+                cursor.insertText(f'click("{rel_path}")\n')
+                self.console_text.append(f'[System] Inserted click action: {rel_path}')
+            except Exception:
+                pass
+
+        # restore main window
+        self.show(); self.raise_(); self.activateWindow()
+
+    def _get_foreground_app_name(self):
+        # Try to determine foreground process name (Windows). If unavailable, fallback to 'screen'.
+        try:
+            import ctypes
+            import psutil
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            pid = ctypes.c_ulong()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            p = psutil.Process(pid.value)
+            return p.name()
+        except Exception:
+            return 'screen'
 
     def create_text_icon(self, text, color_name):
         from PyQt6.QtGui import QPixmap, QPainter, QColor, QIcon
