@@ -39,10 +39,13 @@ class WebInspectorWorker(QThread):
                             const rect = el.getBoundingClientRect();
                             if (rect.width > 0 && rect.height > 0) {
                                 const ariaLabel = el.getAttribute('aria-label') || '';
+                                const altText = el.alt || el.title || '';
+                                const srcText = el.src ? new URL(el.src, window.location.href).pathname.split('/').pop() : '';
+                                const label = (el.innerText || el.value || el.placeholder || altText || srcText || '').substring(0, 30).trim();
                                 results.push({
                                     id: category + '_' + index,
                                     category: category,
-                                    text: (el.innerText || el.value || el.placeholder || '').substring(0, 30).trim(),
+                                    text: label,
                                     ariaLabel: ariaLabel.substring(0, 30).trim(),
                                     x: rect.x + window.scrollX,
                                     y: rect.y + window.scrollY,
@@ -61,6 +64,7 @@ class WebInspectorWorker(QThread):
                     all_els.push(...getBounds('input[type="checkbox"], input[type="radio"]', 'Checkbox & Radio'));
                     all_els.push(...getBounds('select', 'Selects & Dropdowns'));
                     all_els.push(...getBounds('[role="menuitem"], .menu-item', 'Menu Items'));
+                    all_els.push(...getBounds('img', 'Images'));
                     
                     return all_els;
                 }
@@ -215,6 +219,7 @@ class WebInspectorPane(QWidget):
         self.cb_checkbox_radio = QCheckBox("Checkbox & Radio")
         self.cb_selects = QCheckBox("Selects & Dropdowns")
         self.cb_menus = QCheckBox("Menu Items")
+        self.cb_images = QCheckBox("Images")
         
         self.checkboxes = [
             (self.cb_links, "Links"),
@@ -222,7 +227,8 @@ class WebInspectorPane(QWidget):
             (self.cb_inputs, "Inputs"),
             (self.cb_checkbox_radio, "Checkbox & Radio"),
             (self.cb_selects, "Selects & Dropdowns"),
-            (self.cb_menus, "Menu Items")
+            (self.cb_menus, "Menu Items"),
+            (self.cb_images, "Images")
         ]
         
         for cb, _ in self.checkboxes:
