@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QPlainTextEdit
-from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter
-from PyQt6.QtCore import Qt, QRegularExpression
+from PyQt6.QtWidgets import QPlainTextEdit, QWidget, QTextEdit
+from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter, QPainter
+from PyQt6.QtCore import Qt, QRegularExpression, QRect, QSize
 
 class PythonHighlighter(QSyntaxHighlighter):
     def __init__(self, document):
@@ -34,6 +34,17 @@ class PythonHighlighter(QSyntaxHighlighter):
                 match = matchIterator.next()
                 self.setFormat(match.capturedStart(), match.capturedLength(), format)
 
+class LineNumberArea(QWidget):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.editor = editor
+
+    def sizeHint(self):
+        return QSize(self.editor.line_number_area_width(), 0)
+
+    def paintEvent(self, event):
+        self.editor.line_number_area_paint_event(event)
+
 class PythonEditor(QPlainTextEdit):
     def __init__(self):
         super().__init__()
@@ -52,5 +63,72 @@ class PythonEditor(QPlainTextEdit):
                 padding: 5px;
             }
         """)
-        
+
+        self.lineNumberArea = LineNumberArea(self)
+        self.blockCountChanged.connect(self.update_line_number_area_width)
+        self.updateRequest.connect(self.update_line_number_area)
+        self.cursorPositionChanged.connect(self.highlight_current_line)
+
+        self.update_line_number_area_width(0)
+        self.highlight_current_line()
         self.highlighter = PythonHighlighter(self.document())
+
+    def line_number_area_width(self):
+        digits = len(str(max(1, self.blockCount())))
+        space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
+        return space
+
+    def update_line_number_area_width(self, _):
+        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+
+    def update_line_number_area(self, rect, dy):
+        if dy:
+            self.lineNumberArea.scroll(0, dy)
+        else:
+            self.lineNumberArea.update(0, rect.y(), self.lineNumberArea.width(), rect.height())
+
+        if rect.contains(self.viewport().rect()):
+            self.update_line_number_area_width(0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self.lineNumberArea.setGeometry(QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height()))
+
+    def line_number_area_paint_event(self, event):
+        painter = QPainter(self.lineNumberArea)
+        painter.fillRect(event.rect(), QColor("#252526"))
+
+        block = self.firstVisibleBlock()
+        blockNumber = block.blockNumber()
+        top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
+        bottom = top + self.blockBoundingRect(block).height()
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(blockNumber + 1)
+                painter.setPen(QColor("#858585"))
+                painter.drawText(
+                    0,
+                    int(top),
+                    self.lineNumberArea.width() - 4,
+                    self.fontMetrics().height(),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    number,
+                )
+            block = block.next()
+            top = bottom
+            bottom = top + self.blockBoundingRect(block).height()
+            blockNumber += 1
+
+    def highlight_current_line(self):
+        extraSelections = []
+        if not self.isReadOnly():
+            selection = QTextEdit.ExtraSelection()
+            lineColor = QColor("#2A2D2E")
+            selection.format.setBackground(lineColor)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            extraSelections.append(selection)
+
+        self.setExtraSelections(extraSelections)
