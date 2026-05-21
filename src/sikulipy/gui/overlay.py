@@ -102,7 +102,21 @@ class OverlayWidget(QWidget):
             if hasattr(self, 'target_rect') and self.target_rect is not None:
                 sg = screen.geometry()
                 tr = self.target_rect
-                local_rect = QRect(tr.left() - sg.left(), tr.top() - sg.top(), tr.width(), tr.height())
+                local_x = tr.left() - sg.left()
+                local_y = tr.top() - sg.top()
+                local_w = tr.width()
+                local_h = tr.height()
+                # Account for device pixel ratio (HiDPI)
+                try:
+                    scale = getattr(pix, 'devicePixelRatio', lambda: 1)()
+                except Exception:
+                    scale = 1
+                if scale and scale != 1:
+                    local_x = int(local_x * scale)
+                    local_y = int(local_y * scale)
+                    local_w = int(local_w * scale)
+                    local_h = int(local_h * scale)
+                local_rect = QRect(local_x, local_y, local_w, local_h)
                 pix = pix.copy(local_rect)
         except Exception:
             pass
@@ -130,7 +144,21 @@ class OverlayWidget(QWidget):
             pix = screen.grabWindow(0)
             # map global rect to screen-local by subtracting screen geometry
             sg = screen.geometry()
-            local_rect = QRect(r.left() - sg.left(), r.top() - sg.top(), r.width(), r.height())
+            local_x = r.left() - sg.left()
+            local_y = r.top() - sg.top()
+            local_w = r.width()
+            local_h = r.height()
+            # Account for device pixel ratio (HiDPI)
+            try:
+                scale = getattr(pix, 'devicePixelRatio', lambda: 1)()
+            except Exception:
+                scale = 1
+            if scale and scale != 1:
+                local_x = int(local_x * scale)
+                local_y = int(local_y * scale)
+                local_w = int(local_w * scale)
+                local_h = int(local_h * scale)
+            local_rect = QRect(local_x, local_y, local_w, local_h)
             cropped = pix.copy(local_rect)
             if callable(self.on_captured):
                 try:
