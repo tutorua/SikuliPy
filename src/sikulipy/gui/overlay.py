@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QWidget, QInputDialog
 from PyQt6.QtGui import QPainter, QColor, QPen
-from PyQt6.QtCore import Qt, QRect, QPoint
+from PyQt6.QtCore import Qt, QRect, QPoint, QTimer
 from PyQt6 import QtGui
 
 class OverlayWidget(QWidget):
@@ -13,7 +13,11 @@ class OverlayWidget(QWidget):
         self.mode = mode
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
+        # don't set WA_NoSystemBackground; keep translucent background only
+        # For screen mode we want overlay to be click-through so underlying apps remain interactive
+        if self.mode == 'screen':
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
         self.start = None
         self.end = None
         self.selecting = False
@@ -21,9 +25,23 @@ class OverlayWidget(QWidget):
         self.target_rect = None
 
         # cover virtual geometry
-        screen = QtGui.QGuiApplication.primaryScreen()
-        geom = QtGui.QGuiApplication.primaryScreen().virtualGeometry()
+        # compute virtual desktop geometry across all screens so overlay covers multi-monitor setups
+        try:
+            screens = QtGui.QGuiApplication.screens()
+            if screens:
+                left = min(s.geometry().left() for s in screens)
+                top = min(s.geometry().top() for s in screens)
+                right = max(s.geometry().right() for s in screens)
+                bottom = max(s.geometry().bottom() for s in screens)
+                geom = QRect(QPoint(left, top), QPoint(right, bottom))
+            else:
+                geom = QtGui.QGuiApplication.primaryScreen().geometry()
+        except Exception:
+            geom = QtGui.QGuiApplication.primaryScreen().geometry()
         self.setGeometry(geom)
+
+        if self.mode == 'region':
+            self.setCursor(Qt.CursorShape.CrossCursor)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -36,22 +54,26 @@ class OverlayWidget(QWidget):
                 painter.fillRect(r, QColor(0, 0, 0, 160))
             except Exception:
                 pass
-
-        if self.mode == 'region' and self.start and self.end:
-            r = QRect(self.mapFromGlobal(self.start), self.mapFromGlobal(self.end)).normalized()
-            # clear selection area (draw transparent rect)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-            painter.fillRect(r, QColor(0, 0, 0, 0))
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-            pen = QPen(QColor(180, 180, 180), 2)
-            painter.setPen(pen)
-            painter.drawRect(r)
+        if self.mode == 'region':
+            # dim the entire overlay first
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
+            if self.start and self.end:
+                r = QRect(self.mapFromGlobal(self.start), self.mapFromGlobal(self.end)).normalized()
+                # clear selection area (draw transparent rect)
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+                painter.fillRect(r, QColor(0, 0, 0, 0))
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+                pen = QPen(QColor(180, 180, 180), 2)
+                painter.setPen(pen)
+                painter.drawRect(r)
 
     def mousePressEvent(self, event):
         global_pos = self.mapToGlobal(event.position().toPoint())
         if self.mode == 'screen':
             # capture full screen containing this point
-            self.capture_screen_at(global_pos)
+            # hide overlay first and delay actual grab so it's not visible in the screenshot
+            self.hide()
+            QTimer.singleShot(80, lambda: self.capture_screen_at(global_pos))
         else:
             self.start = global_pos
             self.end = global_pos
@@ -75,13 +97,25 @@ class OverlayWidget(QWidget):
         if not screen:
             screen = QtGui.QGuiApplication.primaryScreen()
         pix = screen.grabWindow(0)
+        # If a target rect is provided (foreground window), crop to that rect so only the dimmed window is captured
+        try:
+            if hasattr(self, 'target_rect') and self.target_rect is not None:
+                sg = screen.geometry()
+                tr = self.target_rect
+                local_rect = QRect(tr.left() - sg.left(), tr.top() - sg.top(), tr.width(), tr.height())
+                pix = pix.copy(local_rect)
+        except Exception:
+            pass
         # call callback if present, then close
         if callable(self.on_captured):
             try:
                 self.on_captured(pix)
             except Exception:
                 pass
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def capture_region(self):
         if not (self.start and self.end):
@@ -90,18 +124,25 @@ class OverlayWidget(QWidget):
         screen = QtGui.QGuiApplication.screenAt(self.start)
         if not screen:
             screen = QtGui.QGuiApplication.primaryScreen()
-        # grab full screen then copy region in global coordinates
-        pix = screen.grabWindow(0)
-        # map global rect to screen-local by subtracting screen geometry
-        sg = screen.geometry()
-        local_rect = QRect(r.left() - sg.left(), r.top() - sg.top(), r.width(), r.height())
-        cropped = pix.copy(local_rect)
-        if callable(self.on_captured):
+        # hide overlay first so it isn't in the captured image
+        self.hide()
+        def do_grab():
+            pix = screen.grabWindow(0)
+            # map global rect to screen-local by subtracting screen geometry
+            sg = screen.geometry()
+            local_rect = QRect(r.left() - sg.left(), r.top() - sg.top(), r.width(), r.height())
+            cropped = pix.copy(local_rect)
+            if callable(self.on_captured):
+                try:
+                    self.on_captured(cropped)
+                except Exception:
+                    pass
             try:
-                self.on_captured(cropped)
+                self.close()
             except Exception:
                 pass
-        self.close()
+
+        QTimer.singleShot(80, do_grab)
 from PyQt6.QtWidgets import QWidget, QApplication
 from PyQt6.QtCore import Qt, QRect, pyqtSignal, QPoint
 from PyQt6.QtGui import QPainter, QColor, QPen

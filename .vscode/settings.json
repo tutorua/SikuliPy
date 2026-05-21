@@ -2,6 +2,24 @@
     "chat.tools.terminal.autoApprove": {
         "git add": true,
         "git commit": true,
-        "git push": true
+        "git push": true,
+        "uv": true,
+        "/^python -c \"from PyQt6\\.QtGui import QTextCharFormat; print\\(\\[n for n in dir\\(QTextCharFormat\\) if 'Full' in n or 'Width' in n or 'Selection' in n\\]\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python -c 'from PyQt6\\.QtGui import QTextCharFormat; print\\(\\[n for n in dir\\(QTextCharFormat\\) if \"Full\" in n or \"Width\" in n or \"Selection\" in n\\]\\)'$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        ".venv\\Scripts\\python.exe": true,
+        "/^python -m py_compile src/sikulipy/gui/overlay\\.py src/sikulipy/gui/main_window\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python -m py_compile src/sikulipy/gui/main_window\\.py src/sikulipy/gui/overlay\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
 }

@@ -13,6 +13,10 @@ import time
 import re
 import pathlib
 import importlib
+import threading
+import queue as _queue
+import ctypes
+import ctypes.wintypes
 from sikulipy.vision import VisionEngine
 from sikulipy.gui.recorder import RecorderDialog
 from sikulipy.gui.web_inspector import WebInspectorWorker, WebInspectorCanvas, WebInspectorPane
@@ -209,6 +213,7 @@ class SikuliPyMainWindow(QMainWindow):
         target_rect = self._get_foreground_window_rect()
         overlay = OverlayWidget(mode=mode)
         overlay.target_rect = target_rect
+
         def on_captured(pixmap):
             # Save and restore main window
             self._handle_captured_pixmap(pixmap, app_name)
@@ -217,6 +222,26 @@ class SikuliPyMainWindow(QMainWindow):
         overlay.show()
         overlay.activateWindow()
         self._active_overlay = overlay
+
+        # For screen mode we need to listen to global mouse clicks because overlay is click-through
+        if mode == 'screen':
+            # prepare queue and stop event
+            self._mouse_queue = _queue.Queue()
+            self._mouse_thread_stop = threading.Event()
+            # start polling thread that watches for left-click via GetAsyncKeyState
+            self._hook_thread = threading.Thread(target=self._mouse_hook_thread, args=(self._mouse_queue, self._mouse_thread_stop), daemon=True)
+            self._hook_thread.start()
+
+            # start poll timer to check for mouse clicks
+            self._mouse_poll_timer = QTimer(self)
+            self._mouse_poll_timer.timeout.connect(lambda: self._poll_mouse_queue(app_name))
+            self._mouse_poll_timer.start(100)
+
+            # start 30s fallback timer
+            self._capture_timeout_timer = QTimer(self)
+            self._capture_timeout_timer.setSingleShot(True)
+            self._capture_timeout_timer.timeout.connect(self._cancel_capture)
+            self._capture_timeout_timer.start(30000)
 
     def _handle_captured_pixmap(self, pixmap, app_name):
         # ensure assets dir
@@ -242,8 +267,27 @@ class SikuliPyMainWindow(QMainWindow):
 
         # restore main window before asking for filename so dialog is visible
         self.show(); self.raise_(); self.activateWindow()
-        # Prompt filename
-        name, ok = QInputDialog.getText(self, 'Save Screenshot', 'Filename (png):', text=default_name)
+
+        # Use a custom topmost dialog so it reliably appears above other windows
+        from PyQt6.QtWidgets import QDialog, QLineEdit, QDialogButtonBox, QVBoxLayout, QLabel
+        dialog = QDialog(self, Qt.WindowType.Window)
+        dialog.setWindowTitle('Save Screenshot')
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel('Filename (png):'))
+        line = QLineEdit(dialog)
+        line.setText(default_name)
+        layout.addWidget(line)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        dialog.setLayout(layout)
+        dialog.raise_(); dialog.activateWindow()
+        res = dialog.exec()
+        ok = (res == QDialog.DialogCode.Accepted)
+        name = line.text() if ok else ''
         if not ok:
             self.console_text.append('[System] Capture cancelled by user.')
             self.show(); self.raise_(); self.activateWindow()
@@ -315,6 +359,148 @@ class SikuliPyMainWindow(QMainWindow):
         except Exception:
             pass
         return None
+
+    def _mouse_hook_thread(self, q, stop_event):
+        # Poll for left mouse button presses using GetAsyncKeyState and push cursor pos to queue
+        try:
+            user32 = ctypes.windll.user32
+            pt = ctypes.wintypes.POINT()
+            while not stop_event.is_set():
+                state = user32.GetAsyncKeyState(0x01)  # VK_LBUTTON
+                if state & 0x8000:
+                    user32.GetCursorPos(ctypes.byref(pt))
+                    try:
+                        q.put((pt.x, pt.y), block=False)
+                    except Exception:
+                        pass
+                    # wait for release
+                    while user32.GetAsyncKeyState(0x01) & 0x8000:
+                        if stop_event.is_set():
+                            break
+                        time.sleep(0.02)
+                    time.sleep(0.05)
+                else:
+                    time.sleep(0.01)
+        except Exception:
+            return
+
+    def _poll_mouse_queue(self, app_name):
+        if not hasattr(self, '_mouse_queue'):
+            return
+        try:
+            x, y = self._mouse_queue.get_nowait()
+        except Exception:
+            return
+
+        # stop timers and thread
+        try:
+            if hasattr(self, '_mouse_poll_timer'):
+                self._mouse_poll_timer.stop()
+            if hasattr(self, '_capture_timeout_timer'):
+                self._capture_timeout_timer.stop()
+            if hasattr(self, '_mouse_thread_stop'):
+                self._mouse_thread_stop.set()
+        except Exception:
+            pass
+
+        # hide/close overlay first, but capture the overlay's target rect if available
+        target_rect = None
+        try:
+            if hasattr(self, '_active_overlay') and self._active_overlay:
+                try:
+                    target_rect = getattr(self._active_overlay, 'target_rect', None)
+                except Exception:
+                    target_rect = None
+                try:
+                    self._active_overlay.hide()
+                except Exception:
+                    try:
+                        self._active_overlay.close()
+                    except Exception:
+                        pass
+                # ensure reference cleared so overlay won't be reused
+                self._active_overlay = None
+        except Exception:
+            pass
+
+        # schedule actual grab slightly later to let the window stack update; pass target_rect for cropping
+        try:
+            QTimer.singleShot(80, lambda: self._do_grab_and_handle(x, y, app_name, target_rect))
+        except Exception:
+            # fallback immediate grab
+            try:
+                from PyQt6 import QtGui
+                from PyQt6.QtCore import QPoint
+                pos = QtGui.QPoint(x, y)
+                screen = QtGui.QGuiApplication.screenAt(pos)
+                if screen:
+                    pix = screen.grabWindow(0)
+                else:
+                    pix = QtGui.QGuiApplication.primaryScreen().grabWindow(0)
+                if pix:
+                    # crop if we have target_rect
+                    try:
+                        if target_rect is not None:
+                            sg = screen.geometry()
+                            local_rect = QRect(target_rect.left() - sg.left(), target_rect.top() - sg.top(), target_rect.width(), target_rect.height())
+                            pix = pix.copy(local_rect)
+                    except Exception:
+                        pass
+                    self._handle_captured_pixmap(pix, app_name)
+            except Exception:
+                pass
+
+    def _cancel_capture(self):
+        # Called when capture times out
+        try:
+            if hasattr(self, '_capture_timeout_timer'):
+                self._capture_timeout_timer.stop()
+            if hasattr(self, '_mouse_poll_timer'):
+                self._mouse_poll_timer.stop()
+            if hasattr(self, '_mouse_thread_stop'):
+                self._mouse_thread_stop.set()
+            if hasattr(self, '_active_overlay') and self._active_overlay:
+                try:
+                    self._active_overlay.close()
+                except Exception:
+                    pass
+                self._active_overlay = None
+        except Exception:
+            pass
+
+        # restore main window and notify
+        try:
+            self.show(); self.raise_(); self.activateWindow()
+        except Exception:
+            pass
+        self.console_text.append('[System] Capture timed out — cancelled.')
+
+    def _do_grab_and_handle(self, x, y, app_name, target_rect=None):
+        try:
+            from PyQt6 import QtGui
+            from PyQt6.QtCore import QPoint
+            pos = QtGui.QPoint(x, y)
+            screen = QtGui.QGuiApplication.screenAt(pos)
+            if screen:
+                pix = screen.grabWindow(0)
+                # if a target rect was provided, crop to it so we capture only the dimmed window
+                try:
+                    if target_rect is not None:
+                        sg = screen.geometry()
+                        local_rect = QRect(target_rect.left() - sg.left(), target_rect.top() - sg.top(), target_rect.width(), target_rect.height())
+                        pix = pix.copy(local_rect)
+                except Exception:
+                    pass
+            else:
+                pix = QtGui.QGuiApplication.primaryScreen().grabWindow(0)
+        except Exception:
+            pix = None
+
+        if pix:
+            try:
+                self._handle_captured_pixmap(pix, app_name)
+            except Exception:
+                pass
 
     def create_text_icon(self, text, color_name):
         from PyQt6.QtGui import QPixmap, QPainter, QColor, QIcon
@@ -606,37 +792,53 @@ class SikuliPyMainWindow(QMainWindow):
                 break
 
     def start_region_capture(self, callback=None):
-        self.overlay = RegionCaptureOverlay()
+        # Use OverlayWidget in 'region' mode (dims only target rect)
+        overlay = OverlayWidget(mode='region')
+        # determine foreground app for default filename
+        app_name = self._get_foreground_app_name()
         if callback:
-            self.overlay.captureComplete.connect(callback)
+            overlay.on_captured = callback
         else:
-            self.overlay.captureComplete.connect(self.on_region_captured_for_ocr)
-        self.overlay.show()
+            # default: treat region capture like screen capture — prompt for filename and save
+            overlay.on_captured = lambda pix, app=app_name: self._handle_captured_pixmap(pix, app)
+        # Hide main window first so underlying apps remain visible, then show overlay
+        try:
+            self.hide()
+            # small delay to allow OS to repaint/raise underlying windows
+            QTimer.singleShot(200, lambda: (overlay.show(), setattr(self, '_active_overlay', overlay)))
+        except Exception:
+            overlay.show()
+            self._active_overlay = overlay
 
-    def on_region_captured_for_ocr(self, rect):
+    def on_region_captured_for_ocr(self, rect_or_pix):
         from PyQt6.QtWidgets import QApplication
         from PyQt6.QtCore import QByteArray, QBuffer, QIODevice
         import numpy as np
         import cv2
 
-        screen = QApplication.primaryScreen()
-        # Grab the specified region from the screen
-        pixmap = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
-        
+        # Support being called with a QRect (old flow) or a QPixmap (new flow)
+        if hasattr(rect_or_pix, 'toImage'):
+            pixmap = rect_or_pix
+            info_str = 'region (pixmap)'
+        else:
+            rect = rect_or_pix
+            screen = QApplication.primaryScreen()
+            pixmap = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
+            info_str = f'region {rect.x()}, {rect.y()}, {rect.width()}x{rect.height()}'
+
         # Convert QPixmap to numpy array by saving to a memory buffer as PNG
         byte_array = QByteArray()
         buffer = QBuffer(byte_array)
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
         pixmap.save(buffer, "PNG")
         buffer.close()
-        
+
         img_np = np.frombuffer(byte_array.data(), dtype=np.uint8)
         arr_bgr = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
-        
-        self.console_text.append(f"\n[System] Captured region {rect.x()}, {rect.y()}, {rect.width()}x{rect.height()}. Running OCR...")
-        from PyQt6.QtWidgets import QApplication
+
+        self.console_text.append(f"\n[System] Captured {info_str}. Running OCR...")
         QApplication.processEvents() # Force UI update
-        
+
         try:
             text = VisionEngine.extract_text(arr_bgr)
             self.console_text.append(f"[OCR Result]\n{text}\n{'-'*20}")
